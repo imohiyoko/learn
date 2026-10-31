@@ -10,7 +10,7 @@ description: 対象の試験を設定・変更する。exam/profile.md を対話
 1. `exam/profile.md`（あれば）と `examples/` の一覧を確認する
    - 対象の試験が `examples/<name>/profile.md` にあれば、それを `exam/profile.md` にコピーし、目標受験時期と学習者メモだけ聞いて埋めれば終わり
    - なければ `templates/profile.md` を `exam/profile.md` にコピーして、以下の手順で埋める
-2. 既存の `log/history.jsonl` に記録があり、別の試験に切り替える場合：
+2. 既存の `log/history.jsonl` か `log/drill.jsonl` に記録があり、別の試験に切り替える場合：
    - 学習者に確認してから、`questions/ rubrics/ answers/ results/ log/` を `archive/<旧試験の略称>-<YYYYMMDD>/` に移動する（削除はしない）
 3. 次をまとめて質問する（分からない項目は Web で公式情報を調べて提案してよい）：
    - 試験名と、記述式で練習したい科目

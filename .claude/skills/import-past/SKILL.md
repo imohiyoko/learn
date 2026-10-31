@@ -14,8 +14,8 @@ description: refs/ に置いた公式の過去問と解答例を読み取り、q
 2. `questions/past-<年度>-<問番号>.md` を作る
    - `templates/question.md` の形で書く。front matter は `source: past`、`verified: true`、`tags` は `exam/profile.md` のタグから主タグを先頭に選ぶ、`time_limit_min` は profile の目安時間、`issued_at` は取り込んだ時刻
    - 本文・設問は学習者のローカル作業用として取り込む。表やログはテキストで書き起こす
-   - 構成図・画面・グラフなど、文字にすると情報が落ちる図は画像で取り込む：
-     - `pdftoppm` が使えれば `pdftoppm -f <ページ> -l <ページ> -r 150 -png refs/<ファイル> questions/assets/past-<年度>-<問番号>-p<ページ>` でページを画像にし、本文の該当箇所に `![図1](assets/<出力されたファイル名>)` と書く
+   - 構成図・画面・グラフなど、文字にすると情報が落ちる図は画像で取り込む（先に `mkdir -p questions/assets` で保存先を作る）：
+     - `pdftoppm` が使えれば `pdftoppm -f <ページ> -l <ページ> -r 150 -png "refs/<ファイル>" "questions/assets/past-<年度>-<問番号>-p<ページ>"`（ファイル名に空白があっても分割されないよう、パスは引用符で囲む） でページを画像にし、本文の該当箇所に `![図1](assets/<出力されたファイル名>)` と書く
      - 使えなければ「refs/<ファイル> の p.<ページ> 図1 を参照」と書き、図から読み取れる要素（機器・接続・矢印の向き）を箇条書きで添える
      - `refs/` に問題が画像（スクリーンショットや写真）で置かれていたら、そのまま `questions/assets/` にコピーして参照してよい
 3. `rubrics/past-<年度>-<問番号>.md` を作る

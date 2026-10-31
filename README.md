@@ -108,7 +108,7 @@ Claude Code で記述式問題の「出題 → 解答 → 採点 → 弱点更�
 ├ templates/              # プロファイル・問題・採点基準・解答・結果・ログのひな形
 ├ scripts/stats.py        # 成績集計と出題分野の推薦（Python標準ライブラリのみ）
 ├ questions/ rubrics/ answers/ results/
-│  └ questions/assets/    # 問題の図
+├ questions/assets/       # 問題の図（画像・SVG）
 ├ log/history.jsonl       # 記述式の成績
 ├ log/drill.jsonl         # 択一ドリルの成績（1問1行）
 └ refs/                   # 公式資料（git管理外）
