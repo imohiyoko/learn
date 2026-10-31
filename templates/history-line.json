@@ -1,0 +1,1 @@
+{"id": "20261025-2130-web", "source": "generated", "tags": ["web", "auth"], "score": 62, "max": 100, "minutes": 48, "graded_at": "2026-10-25T22:20:00+09:00", "weak": ["本文根拠の引用不足", "セッション固定化の対策"], "miss_type": {"knowledge": 2, "reading": 1, "writing": 1}}

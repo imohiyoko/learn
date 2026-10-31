@@ -1,0 +1,34 @@
+# 雛形だけを共有する。学習データ・個人設定は push しない。
+# （フォルダを残すため .gitkeep だけは追跡する）
+
+# 個人の試験プロファイル（雛形は templates/profile.md、サンプルは examples/）
+exam/*
+!exam/.gitkeep
+
+# 学習の記録
+questions/*
+!questions/.gitkeep
+rubrics/*
+!rubrics/.gitkeep
+answers/*
+!answers/.gitkeep
+results/*
+!results/.gitkeep
+log/*
+!log/.gitkeep
+
+# 公式過去問・参考書PDFなどの資料
+refs/*
+!refs/README.md
+
+# 公式過去問を取り込んだファイル（念のため場所を問わず除外）
+**/past-*
+
+# 試験切り替え時に退避した過去の記録
+archive/
+
+# 個人の Claude Code 設定
+.claude/settings.local.json
+
+.DS_Store
+__pycache__/
