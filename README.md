@@ -20,6 +20,8 @@ Claude Code で記述式問題の「出題 → 解答 → 採点 → 弱点更�
 - **採点基準は出題時に作って保存**するので、解答を見てから甘くなることがありません
 - **出題者・検証者・採点者を分けています**（`.claude/agents/`）。verifier は採点基準を見ずに解いて、問題の曖昧さを潰します
 - **ミスを3種類に分けて記録**します：`knowledge`（知らなかった）/ `reading`（本文を読み落とした）/ `writing`（書き方で落とした）
+- **択一ドリル**（`/drill`）で、午前・科目Aのような選択式の知識問題もまとめて回せます。記録は記述式と分けて集計します
+- **図や写真も扱えます**。問題の図は文字（表・Mermaid）か画像で、解答は手書きの写真やスクリーンショットでも採点できます
 
 ## はじめ方
 
@@ -43,13 +45,21 @@ Claude Code で記述式問題の「出題 → 解答 → 採点 → 弱点更�
 
 | コマンド | やること |
 |---|---|
-| `/question [タグ]` | 1問出題。タグ省略時は弱点から自動選択 |
+| `/question [タグ]` | 記述式を1問出題。タグ省略時は弱点から自動選択 |
+| `/drill [タグ] [問題数]` | 択一をまとめて出題し、その場で答え合わせ（`1ア 2ウ …` で回答） |
 | `/grade [id]` | 採点・講評・記録・次の提案 |
 | `/review` | 分野別の成績、ミスの傾向、次の3問 |
 | `/setup-exam` | 試験の設定・切り替え |
 | `/import-past <年度> <問>` | `refs/` の公式過去問を取り込み、公式解答例で採点できるようにする |
 
 解答は `answers/<id>.md` に書いても、チャットに直接貼っても大丈夫です。スマホから使うときはチャットに貼る方が楽です。
+紙に手書きした解答は、写真をチャットに貼るか `answers/<id>-1.jpg` のように置けば、文字に書き起こしてから採点します（読めない字だけ確認されます）。
+
+## 図のある問題
+
+- 生成問題の図（構成図・シーケンス・画面）は、まず表・コードブロック・Mermaid で表現します。絵でないと伝わらない図だけ SVG にして `questions/assets/` に置きます
+- 公式過去問を `/import-past` で取り込むとき、`pdftoppm`（poppler）が入っていれば図のページを画像にして `questions/assets/` に置きます。なければページ番号で参照します
+  - macOS：`brew install poppler`、Ubuntu：`sudo apt install poppler-utils`
 
 ## 出題分野の選び方
 
@@ -59,7 +69,7 @@ Claude Code で記述式問題の「出題 → 解答 → 採点 → 弱点更�
 - その後は「直近3回の平均点が低い × 分野の重み」が大きい順
 - 直前と同じ分野は優先度を下げる
 
-重みは `exam/profile.md` の分野タグ表で調整できます。
+重みは `exam/profile.md` の分野タグ表で調整できます。択一ドリルも同じルールで分野を選びます（`--log drill`。直近は10問で見ます）。
 
 ## 公式過去問との併用（おすすめ）
 
@@ -78,7 +88,8 @@ Claude Code で記述式問題の「出題 → 解答 → 採点 → 弱点更�
 |---|---|
 | 試験・形式・分野 | `exam/profile.md`（または `/setup-exam`） |
 | 採点の厳しさ | `exam/profile.md` の採点方針、`.claude/agents/grader.md` |
-| 問題の作り方 | `.claude/skills/question/SKILL.md` |
+| 問題の作り方 | `.claude/skills/question/SKILL.md`（択一は `.claude/skills/drill/SKILL.md`） |
+| 択一の選択肢の数・問題数 | `exam/profile.md` の「択一問題」 |
 | 結果の書式 | `templates/` |
 | 分野の推薦ロジック | `scripts/stats.py` |
 
@@ -90,14 +101,16 @@ Claude Code で記述式問題の「出題 → 解答 → 採点 → 弱点更�
 .
 ├ CLAUDE.md               # Claude への全体ルール
 ├ .claude/
-│  ├ skills/              # question / grade / review / setup-exam / import-past
+│  ├ skills/              # question / drill / grade / review / setup-exam / import-past
 │  └ agents/              # verifier（検証役）/ grader（採点役）
 ├ exam/profile.md         # 今の試験の設定（git管理外、/setup-exam で作成）
 ├ examples/               # 試験ごとの設定サンプル
 ├ templates/              # プロファイル・問題・採点基準・解答・結果・ログのひな形
 ├ scripts/stats.py        # 成績集計と出題分野の推薦（Python標準ライブラリのみ）
 ├ questions/ rubrics/ answers/ results/
-├ log/history.jsonl       # 成績の記録
+│  └ questions/assets/    # 問題の図
+├ log/history.jsonl       # 記述式の成績
+├ log/drill.jsonl         # 択一ドリルの成績（1問1行）
 └ refs/                   # 公式資料（git管理外）
 ```
 
