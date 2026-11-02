@@ -1,0 +1,23 @@
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: 集計スクリプトのテスト
+        run: python -m unittest discover -s tests -v
+      - name: 記録がない状態でも動くか
+        run: |
+          cp examples/sc/profile.md exam/profile.md
+          python scripts/stats.py
+          python scripts/analyze.py
+          python scripts/analyze.py --json > /dev/null
