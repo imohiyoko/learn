@@ -80,20 +80,28 @@ def is_num(x):
     return isinstance(x, (int, float)) and not isinstance(x, bool)
 
 
+def is_finite(x):
+    # int は math.isfinite に渡すと桁あふれすることがあるので、そのまま有限とみなす
+    return is_num(x) and (isinstance(x, int) or math.isfinite(x))
+
+
 def validate(row):
     """記録1行の形をチェックし、問題があれば理由を返す。"""
     if not isinstance(row, dict):
         return "オブジェクトではない"
-    if not is_num(row.get("score")):
+    if not is_finite(row.get("score")):
         return "score が数値でない"
-    if not is_num(row.get("max")) or row["max"] <= 0:
+    if not is_finite(row.get("max")) or row["max"] <= 0:
         return "max が正の数値でない"
     tags = row.get("tags")
     if not isinstance(tags, list) or not tags or not all(isinstance(t, str) and t for t in tags):
         return "tags が文字列のリストでない"
     mt = row.get("miss_type")
-    if mt is not None and (not isinstance(mt, dict) or not all(is_num(v) for v in mt.values())):
+    if mt is not None and (not isinstance(mt, dict) or not all(is_finite(v) for v in mt.values())):
         return "miss_type の値が数値でない"
+    weak = row.get("weak")
+    if weak is not None and not isinstance(weak, list):
+        return "weak がリストでない"
     return None
 
 

@@ -104,11 +104,41 @@ class AnalyzeTest(unittest.TestCase):
         self.assertIn("まだ記録がありません", analyze.render(self.run_analyze([], [])))
 
 
+    def test_bad_rows_are_skipped(self):
+        h, d = self.dir / "history.jsonl", self.dir / "drill.jsonl"
+        h.write_text('{"tags":["web"],"score":NaN,"max":100}\n'
+                     '{"tags":["web"],"score":50,"max":Infinity}\n'
+                     '{"tags":["web"],"score":50,"max":100,"weak":"根拠"}\n'
+                     '{"tags":["web"],"score":50,"max":100,"graded_at":"2026-10-01T10:00"}\n', encoding="utf-8")
+        write_jsonl(d, [])
+        rows = analyze.load_rows(h, d)
+        self.assertEqual(len(rows), 1)
+
+    def test_rows_sorted_by_time_across_offsets(self):
+        # 文字列では UTC の方が先に並ぶが、時刻では +09:00 の方が先
+        hist = [written(1, "web", 10, graded_at="2026-10-01T10:00:00+09:00"),
+                written(2, "web", 90, graded_at="2026-10-01T02:00:00Z")]
+        h, d = self.dir / "history.jsonl", self.dir / "drill.jsonl"
+        write_jsonl(h, hist)
+        write_jsonl(d, [])
+        self.assertEqual([r["id"] for r in analyze.load_rows(h, d)], ["w1", "w2"])
+
+    def test_duplicates_in_a_row_count_once(self):
+        hist = [dict(written(i, "web", 50), tags=["web", "web"], weak=["根拠", "根拠 "]) for i in range(2)]
+        a = self.run_analyze(hist, [])
+        self.assertEqual(a["tags"]["web"]["written"]["evidence"], 2.0)
+        self.assertEqual(a["repeated_weak"][0]["count"], 2)
+
+    def test_overall_is_capped(self):
+        a = self.run_analyze([written(1, "web", 120)], [])
+        self.assertEqual(a["overall"]["written_avg"], 1.0)
+
+
 class PassRatioTest(unittest.TestCase):
     def parse(self, line):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "profile.md"
-            p.write_text(f"# x\n\n- {line}\n", encoding="utf-8")
+            p.write_text(f"# x\n\n- {line}\n" if not line.startswith("#") else line, encoding="utf-8")
             return analyze.parse_pass_ratio(p)
 
     def test_formats(self):
@@ -118,6 +148,11 @@ class PassRatioTest(unittest.TestCase):
         self.assertAlmostEqual(self.parse("合格基準：7割"), 0.7)
         self.assertAlmostEqual(self.parse("合格基準：<!-- TODO 例：100点満点中80点以上 -->"), 0.6)
         self.assertAlmostEqual(analyze.parse_pass_ratio(Path("/nonexistent/profile.md")), 0.6)
+
+    def test_ignores_comments_and_prose(self):
+        text = ("# x\n\n<!--\n- 合格基準：80%\n-->\n"
+                "前回の合格基準は90%だった。\n- 合格基準：70%\n")
+        self.assertAlmostEqual(self.parse(text), 0.7)
 
 
 if __name__ == "__main__":

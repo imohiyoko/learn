@@ -23,12 +23,14 @@ import math
 import re
 import sys
 from collections import Counter, defaultdict
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import stats  # noqa: E402  同じフォルダの stats.py（タグとログの読み込みを共有する）
 
 DEFAULT_PASS = 0.6
+LOCAL_TZ = datetime.now().astimezone().tzinfo  # タイムゾーンのない graded_at はこの端末の時刻とみなす
 SUB_TAG_WEIGHT = 0.5
 V_INIT = 1.0                 # 観測前の不確かさ
 V_MIN = 0.05                 # 不確かさの下限（古い結果に縛られすぎないように）
@@ -52,10 +54,12 @@ def parse_pass_ratio(path=stats.PROFILE):
     """「合格基準：100点満点中60点以上」「60%以上」などから合格ラインの得点率を読む。"""
     if not path.exists():
         return DEFAULT_PASS
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if "合格基準" not in line:
+    body = re.sub(r"<!--.*?-->", "", path.read_text(encoding="utf-8"), flags=re.S)
+    for line in body.splitlines():
+        # 「- 合格基準：…」の箇条書きだけを見る（本文中の言及は拾わない）
+        if not re.match(r"^\s*[-*]\s*合格基準\s*[：:]", line):
             continue
-        text = re.sub(r"<!--.*?-->", "", line)
+        text = line
         m = re.search(r"(\d+(?:\.\d+)?)\s*点満点中\s*(\d+(?:\.\d+)?)\s*点", text)
         if m and float(m.group(1)) > 0:
             return min(max(float(m.group(2)) / float(m.group(1)), 0.0), 1.0)
@@ -76,12 +80,24 @@ def load_rows(history_path=None, drill_path=None):
     for kind, path in (("written", history_path), ("drill", drill_path)):
         for r in stats.load_history(path):
             rows.append(dict(r, _kind=kind))
-    rows.sort(key=lambda r: str(r.get("graded_at") or ""))
+    rows.sort(key=sort_key)
     return rows
 
 
+def sort_key(row):
+    """graded_at を時刻として並べる（タイムゾーンの違う記録が混ざっても順序を保つ）。"""
+    raw = str(row.get("graded_at") or "")
+    try:
+        t = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=LOCAL_TZ)
+        return (0, t.timestamp(), raw)
+    except ValueError:
+        return (1, 0.0, raw)
+
+
 def new_model():
-    return {"theta": 0.0, "v": V_INIT, "evidence": 0.0, "series": []}
+    return {"theta": 0.0, "v": V_INIT, "evidence": 0.0, "series": [], "n_sub": 0}
 
 
 def new_tag(name="(profile未登録)", weight=1.0):
@@ -107,6 +123,7 @@ def summarize(m, kind):
         "low": sigmoid(m["theta"] - 1.96 * sd),
         "high": sigmoid(m["theta"] + 1.96 * sd),
         "n": len(m["series"]),
+        "n_sub": m["n_sub"],
         "avg": avg(m["series"]),
         "evidence": round(m["evidence"], 2),
         "enough": m["evidence"] >= MIN_EVIDENCE[kind],
@@ -120,8 +137,9 @@ def analyze(tags, rows, pass_ratio=DEFAULT_PASS):
     weak_all = defaultdict(lambda: {"count": 0, "tags": Counter(), "label": None})
 
     for row in rows:
-        y = min(max(row["score"] / row["max"], 0.0), 1.0)
-        for i, tag in enumerate(row["tags"]):
+        y = ratio(row)
+        row_tags = list(dict.fromkeys(row["tags"]))  # 同じタグの重複は1つにまとめる
+        for i, tag in enumerate(row_tags):
             s = per.setdefault(tag, new_tag())
             m = s["models"][row["_kind"]]
             update(m, y, 1.0 if i == 0 else SUB_TAG_WEIGHT)
@@ -131,15 +149,22 @@ def analyze(tags, rows, pass_ratio=DEFAULT_PASS):
                     if stats.is_num(v) and v > 0:
                         s["miss"][k] += int(v)
                         total_miss[k] += int(v)
+            else:
+                m["n_sub"] += 1
+        seen = set()
         for term in row.get("weak") or []:
             if not isinstance(term, str) or not term.strip():
                 continue
             key = re.sub(r"\s+", "", term).casefold()
+            if key in seen:  # 1つの記録の中の重複は1回に数える
+                continue
+            seen.add(key)
             e = weak_all[key]
             e["count"] += 1
             e["label"] = e["label"] or term.strip()
-            e["tags"][row["tags"][0]] += 1
-            per[row["tags"][0]]["weak"][term.strip()] += 1
+            # 弱点はその問題の主題（主タグ）のものとして数える
+            e["tags"][row_tags[0]] += 1
+            per[row_tags[0]]["weak"][term.strip()] += 1
 
     result = {}
     for tag, s in per.items():
@@ -181,13 +206,17 @@ def analyze(tags, rows, pass_ratio=DEFAULT_PASS):
         "pass_ratio": pass_ratio,
         "attempts": {"written": len(written), "drill": len(drill)},
         "overall": {
-            "written_avg": avg([r["score"] / r["max"] for r in written]),
-            "drill_avg": avg([r["score"] / r["max"] for r in drill]),
+            "written_avg": avg([ratio(r) for r in written]),
+            "drill_avg": avg([ratio(r) for r in drill]),
         },
         "miss_type": dict(total_miss),
         "tags": result,
         "repeated_weak": repeated[:10],
     }
+
+
+def ratio(row):
+    return min(max(row["score"] / row["max"], 0.0), 1.0)
 
 
 def avg(xs):
@@ -248,7 +277,9 @@ def render(a):
         if not f:
             return f"{label} —"
         tr = TREND_LABEL[f["trend"]]
-        return (f"{mark}{label}{f['n']}{'件' if label == '記述' else '問'} {pct(f['p'])}"
+        unit = "件" if label == "記述" else "問"
+        sub = f"(+副{f['n_sub']})" if f["n_sub"] else ""
+        return (f"{mark}{label}{f['n']}{unit}{sub} {pct(f['p'])}"
                 f"（{pct(f['low'])}〜{pct(f['high'])}）{'' if f['enough'] else '参考'}{tr}")
 
     def line(t, s):
