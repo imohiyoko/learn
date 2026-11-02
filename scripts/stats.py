@@ -81,8 +81,13 @@ def is_num(x):
 
 
 def is_finite(x):
-    # int は math.isfinite に渡すと桁あふれすることがあるので、そのまま有限とみなす
-    return is_num(x) and (isinstance(x, int) or math.isfinite(x))
+    """float にしても有限な数値か（NaN・無限大・float に収まらない巨大な整数を除く）。"""
+    if not is_num(x):
+        return False
+    try:
+        return math.isfinite(float(x))
+    except OverflowError:
+        return False
 
 
 def validate(row):

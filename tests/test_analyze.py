@@ -129,6 +129,21 @@ class AnalyzeTest(unittest.TestCase):
         self.assertEqual(a["tags"]["web"]["written"]["evidence"], 2.0)
         self.assertEqual(a["repeated_weak"][0]["count"], 2)
 
+    def test_tag_weak_terms_merge_spacing(self):
+        hist = [written(1, "web", 30, weak=["SameSite 属性"]), written(2, "web", 30, weak=["SameSite属性"])]
+        self.assertEqual(self.run_analyze(hist, [])["tags"]["web"]["weak"], ["SameSite 属性"])
+
+    def test_fractional_miss_below_one_is_ignored(self):
+        s = self.run_analyze([written(1, "web", 30, miss_type={"reading": 0.5})], [])
+        self.assertEqual(s["tags"]["web"]["miss"], {})
+        self.assertEqual(s["miss_type"], {})
+
+    def test_huge_int_is_skipped(self):
+        h, d = self.dir / "history.jsonl", self.dir / "drill.jsonl"
+        h.write_text('{"tags":["web"],"score":1,"max":' + "9" * 400 + '}\n', encoding="utf-8")
+        write_jsonl(d, [])
+        self.assertEqual(analyze.load_rows(h, d), [])
+
     def test_overall_is_capped(self):
         a = self.run_analyze([written(1, "web", 120)], [])
         self.assertEqual(a["overall"]["written_avg"], 1.0)

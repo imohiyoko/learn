@@ -30,7 +30,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import stats  # noqa: E402  同じフォルダの stats.py（タグとログの読み込みを共有する）
 
 DEFAULT_PASS = 0.6
-LOCAL_TZ = datetime.now().astimezone().tzinfo  # タイムゾーンのない graded_at はこの端末の時刻とみなす
 SUB_TAG_WEIGHT = 0.5
 V_INIT = 1.0                 # 観測前の不確かさ
 V_MIN = 0.05                 # 不確かさの下限（古い結果に縛られすぎないように）
@@ -90,7 +89,7 @@ def sort_key(row):
     try:
         t = datetime.fromisoformat(raw.replace("Z", "+00:00"))
         if t.tzinfo is None:
-            t = t.replace(tzinfo=LOCAL_TZ)
+            t = t.astimezone()  # タイムゾーンのない値は、その日付での端末の時刻とみなす（夏時間も考慮）
         return (0, t.timestamp(), raw)
     except ValueError:
         return (1, 0.0, raw)
@@ -146,9 +145,10 @@ def analyze(tags, rows, pass_ratio=DEFAULT_PASS):
             if i == 0:
                 m["series"].append(y)
                 for k, v in (row.get("miss_type") or {}).items():
-                    if stats.is_num(v) and v > 0:
-                        s["miss"][k] += int(v)
-                        total_miss[k] += int(v)
+                    n = int(v) if stats.is_num(v) else 0
+                    if n > 0:
+                        s["miss"][k] += n
+                        total_miss[k] += n
             else:
                 m["n_sub"] += 1
         seen = set()
@@ -164,7 +164,7 @@ def analyze(tags, rows, pass_ratio=DEFAULT_PASS):
             e["label"] = e["label"] or term.strip()
             # 弱点はその問題の主題（主タグ）のものとして数える
             e["tags"][row_tags[0]] += 1
-            per[row_tags[0]]["weak"][term.strip()] += 1
+            per[row_tags[0]]["weak"][key] += 1
 
     result = {}
     for tag, s in per.items():
@@ -191,7 +191,7 @@ def analyze(tags, rows, pass_ratio=DEFAULT_PASS):
             "written": w, "drill": d,
             "main_miss": s["miss"].most_common(1)[0][0] if s["miss"] else None,
             "miss": dict(s["miss"]),
-            "weak": [t for t, _ in s["weak"].most_common(3)],
+            "weak": [weak_all[k]["label"] for k, _ in s["weak"].most_common(3)],
             "gap": format_gap(w, d, pass_ratio),
         }
 
