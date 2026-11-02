@@ -6,6 +6,8 @@
   python3 scripts/stats.py --next     次に出題すべきタグを1つ
   python3 scripts/stats.py --next 3   上位3つ
   python3 scripts/stats.py --json     集計結果をJSONで出力
+  python3 scripts/stats.py --log drill [--next N]
+                                      択一ドリルの記録（log/drill.jsonl）で同じことをする
 """
 import argparse
 import json
@@ -16,7 +18,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 PROFILE = ROOT / "exam" / "profile.md"
-HISTORY = ROOT / "log" / "history.jsonl"
+LOGS = {
+    # 名前: (ファイル, 「直近」とみなす件数)。択一は1問ごとの記録なので多めに見る
+    "history": (ROOT / "log" / "history.jsonl", 3),
+    "drill": (ROOT / "log" / "drill.jsonl", 10),
+}
+HISTORY, RECENT_N = LOGS["history"]
 
 SUB_TAG_WEIGHT = 0.5      # 副タグの成績は主タグの半分の重みで数える
 RECENT_PENALTY = 0.6      # 直前に出たタグは優先度を下げる（連続出題を避ける）
@@ -58,11 +65,11 @@ def load_history(path=HISTORY):
         try:
             row = json.loads(line)
         except json.JSONDecodeError:
-            print(f"warning: log/history.jsonl {n}行目がJSONとして読めません。スキップします", file=sys.stderr)
+            print(f"warning: log/{path.name} {n}行目がJSONとして読めません。スキップします", file=sys.stderr)
             continue
         problem = validate(row)
         if problem:
-            print(f"warning: log/history.jsonl {n}行目をスキップ（{problem}）", file=sys.stderr)
+            print(f"warning: log/{path.name} {n}行目をスキップ（{problem}）", file=sys.stderr)
             continue
         rows.append(row)
     rows.sort(key=lambda r: str(r.get("graded_at") or ""))
@@ -90,7 +97,7 @@ def validate(row):
     return None
 
 
-def aggregate(tags, history):
+def aggregate(tags, history, recent_n=RECENT_N):
     stats = {t: {"name": name, "weight": w, "n": 0, "wsum": 0.0, "ratio_sum": 0.0, "ratios": []}
              for t, (name, w) in tags.items()}
     miss = {"knowledge": 0, "reading": 0, "writing": 0}
@@ -114,7 +121,7 @@ def aggregate(tags, history):
                 miss[k] += int(v)
     for s in stats.values():
         s["avg"] = s["ratio_sum"] / s["wsum"] if s["wsum"] else None
-        s["recent"] = (sum(s["ratios"][-3:]) / len(s["ratios"][-3:])) if s["ratios"] else None
+        s["recent"] = (sum(s["ratios"][-recent_n:]) / len(s["ratios"][-recent_n:])) if s["ratios"] else None
     return stats, miss
 
 
@@ -147,14 +154,17 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--next", nargs="?", const=1, type=int, metavar="N", help="次に出題すべきタグを N 個")
     ap.add_argument("--json", action="store_true", help="JSON で出力")
+    ap.add_argument("--log", choices=sorted(LOGS), default="history",
+                    help="集計する記録（history：記述式、drill：択一ドリル）")
     args = ap.parse_args()
 
     tags = load_tags()
     if not tags:
         print("exam/profile.md に分野タグがありません。/setup-exam で設定してください。", file=sys.stderr)
         return 1
-    history = load_history()
-    stats, miss = aggregate(tags, history)
+    log_path, recent_n = LOGS[args.log]
+    history = load_history(log_path)
+    stats, miss = aggregate(tags, history, recent_n)
 
     if args.next is not None:
         if args.next < 1:
@@ -182,7 +192,7 @@ def main():
         print(f"全体平均: {pct(overall)}")
     print()
     print("回数は「主タグとして出た回数(+副タグとして出た回数)」")
-    print(f"{'タグ':<10}{'回数':>7}  {'平均':>5}  {'直近3回':>6}  分野")
+    print(f"{'タグ':<10}{'回数':>7}  {'平均':>5}  {f'直近{recent_n}回':>6}  分野")
     order = sorted(stats.items(), key=lambda kv: (kv[1]["avg"] is None, kv[1]["avg"] or 0))
     for t, s in order:
         count = f"{s['n']}" + (f"(+{s['n_sub']})" if s.get("n_sub") else "")
