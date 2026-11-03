@@ -20,10 +20,7 @@
     },
     "source": {
       "type": "string",
-      "enum": [
-        "generated",
-        "past"
-      ]
+      "description": "generated（生成問題）か past（公式過去問）。問題バンクの長文は問題の front matter に source がないので、ないこともある"
     },
     "tags": {
       "type": "array",
