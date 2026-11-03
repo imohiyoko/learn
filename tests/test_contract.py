@@ -102,19 +102,21 @@ class ServerLinesTest(unittest.TestCase):
             sets.answer_set_item(s["id"], it["id"], "ア")
         self.check("bank.jsonl", "bank-line")
 
-    def test_bank_choice_confidence(self):
+    def test_bank_choice_unsure(self):
+        """選択肢ごとの「不安」の印。選んだ答えに印があれば勘、ほかだけなら消去法、印なしは不明。"""
         s = sets.create_set(n=3, kind="choice")
         a, b, c = [it["id"] for it in s["items"]]
-        sets.answer_set_item(s["id"], a, "ア", "guess")
-        sets.answer_set_item(s["id"], b, "ア", "sure")
-        with self.assertRaises(ValueError):
-            sets.answer_set_item(s["id"], c, "ア", "maybe")
-        with self.assertRaises(ValueError):
-            sets.answer_set_item(s["id"], c, "ア", "")
-        sets.answer_set_item(s["id"], c, "ア")  # 確信度なしの古い呼び出しも受ける
+        sets.answer_set_item(s["id"], a, "ア", ["ア", "イ"])
+        sets.answer_set_item(s["id"], b, "ア", ["イ", "イ"])
+        for bad in ("イ", ["ウ"], [1], [None]):
+            with self.assertRaises(ValueError):
+                sets.answer_set_item(s["id"], c, "ア", bad)
+        sets.answer_set_item(s["id"], c, "ア")  # 印なし
         self.check("bank.jsonl", "bank-line")
         rows = jsonl(files.ROOT / "log" / "bank.jsonl")
-        self.assertEqual([r.get("confidence") for r in rows], ["guess", "sure", None])
+        self.assertEqual([(r.get("unsure"), r.get("confidence")) for r in rows],
+                         [(["ア", "イ"], "guess"), (["イ"], "narrowed"), (None, None)])
+        self.assertEqual(sets.load_set(s["id"])["results"][b]["unsure"], ["イ"])
 
 
 if __name__ == "__main__":

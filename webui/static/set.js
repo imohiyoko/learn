@@ -8,7 +8,7 @@ import { pct } from "./stats.js";
 // ---------------------------------------------------------- セット（問題バンク）
 // scripts/route.py が選んだ問題を1問ずつ。択一は答えたその場でサーバーが採点して解説を出す。
 // 記述は書いて保存し、最後に提出すると /grade-set が採点とレポートを作る
-let setAt = 0, setPick = null, setConf = null, setGen = 0;
+let setAt = 0, setPick = null, setUnsure = new Set(), setGen = 0;
 const SLOT_HELP = { "洗い出し": "まだ測れていない論点", "穴埋め": "苦手な論点", "やり直し": "前に間違えた問題", "確認": "得意な論点の確認" };
 
 export async function newSet(opts) {
@@ -66,7 +66,7 @@ function drawSet() {
   if (setAt >= s.items.length) return drawFinish();
   const it = s.items[setAt];
   setPick = null;
-  setConf = null;
+  setUnsure = new Set();
   $("#set-reason").textContent = `${setAt + 1} / ${s.items.length}・${it.kind === "choice" ? "択一" : "記述"}・${it.slot}（${SLOT_HELP[it.slot] || ""}）・${it.reason}`;
   $("#set-body").innerHTML = md.render(it.body).html;
   const answered = it.kind === "choice" && !!it.result;
@@ -74,9 +74,13 @@ function drawSet() {
   $("#set-options").hidden = it.kind !== "choice";
   $("#set-short").hidden = it.kind !== "short";
   if (it.kind === "choice") {
+    const marked = new Set((it.result && it.result.unsure) || []);
+    const locked = answered || s.status !== "open";
     $("#set-options").innerHTML = it.options.map((o) => {
       const cls = answered ? (o.label === right ? "right" : o.label === it.answer ? "wrong" : "") : "";
-      return `<button type="button" data-opt="${esc(o.label)}" class="${cls}"${answered || s.status !== "open" ? " disabled" : ""}><span class="lbl">${esc(o.label)}</span><span>${md.render(o.text).html.replace(/^<p>|<\/p>$/g, "")}</span></button>`;
+      const on = marked.has(o.label);
+      return `<div class="opt-row"><button type="button" data-opt="${esc(o.label)}" class="${cls}"${locked ? " disabled" : ""}><span class="lbl">${esc(o.label)}</span><span>${md.render(o.text).html.replace(/^<p>|<\/p>$/g, "")}</span></button>`
+        + `<button type="button" class="unsure${on ? " on" : ""}" data-unsure="${esc(o.label)}" aria-pressed="${on}" aria-label="${esc(o.label)} に自信がない" title="自信がない"${locked ? " disabled" : ""}>？</button></div>`;
     }).join("");
   } else {
     $("#set-short-text").value = it.answer || "";
@@ -87,14 +91,12 @@ function drawSet() {
   fb.hidden = !answered;
   if (answered) {
     fb.className = "feedback md " + (it.result.correct ? "ok" : "ng");
-    const c = it.result.confidence;
-    const confNote = it.result.correct && (c === "guess" || c === "narrowed")
-      ? `<p class="small">${c === "guess" ? "勘" : "消去法"}で選んだ問題です。当たっても理解の確認にはなりません。解説の各選択肢を読んで、理由を言えるか確かめましょう。</p>`
-      : !it.result.correct && c === "sure" ? `<p class="small">根拠があると思って選んだ問題です。思い込みのずれがここにあります。解説の「${esc(it.answer)}」の行を読みましょう。</p>` : "";
+    const u = it.result.unsure || [];
+    const confNote = !u.length ? ""
+      : `<p class="small">「？」を付けた選択肢：${u.map(esc).join("・")}。${it.result.correct && u.includes(it.answer) ? "自信のないまま当たった問題です。" : ""}解説で、それぞれが正しい・誤りである理由を言えるか確かめましょう。</p>`;
     fb.innerHTML = `<p><b>${it.result.correct ? "正解" : "不正解"}</b>（あなたの答え：${esc(it.answer)}・正解：${esc(right || "")}）</p>` + confNote + md.render(it.key ? it.key.body : "").html;
   }
-  $("#set-conf").hidden = it.kind !== "choice" || s.status !== "open" || answered;
-  $$("#set-conf button").forEach((x) => x.classList.remove("sel"));
+  $("#set-unsure-help").hidden = it.kind !== "choice" || s.status !== "open" || answered;
   $("#set-answer").hidden = s.status !== "open" || answered;
   $("#set-answer").textContent = it.kind === "choice" ? "答える" : "保存して次へ";
   $("#set-answer").disabled = it.kind === "choice";
@@ -175,29 +177,32 @@ function shortCount() {
 $("#set-short-text").addEventListener("input", () => { shortCount(); timerAutoStart(); });
 
 $("#set-options").addEventListener("click", (e) => {
+  const u = e.target.closest("[data-unsure]");
+  if (u) {
+    if (u.disabled) return;
+    const on = !setUnsure.has(u.dataset.unsure);
+    if (on) setUnsure.add(u.dataset.unsure); else setUnsure.delete(u.dataset.unsure);
+    u.classList.toggle("on", on);
+    u.setAttribute("aria-pressed", String(on));
+    timerAutoStart();
+    return;
+  }
   const b = e.target.closest("[data-opt]");
   if (!b || b.disabled) return;
   setPick = b.dataset.opt;
-  $$("#set-options button").forEach((x) => x.classList.toggle("sel", x === b));
-  $("#set-answer").disabled = !setConf;
+  $$("#set-options [data-opt]").forEach((x) => x.classList.toggle("sel", x === b));
+  $("#set-answer").disabled = false;
   timerAutoStart();
-});
-$("#set-conf").addEventListener("click", (e) => {
-  const b = e.target.closest("[data-conf]");
-  if (!b) return;
-  setConf = b.dataset.conf;
-  $$("#set-conf button").forEach((x) => x.classList.toggle("sel", x === b));
-  $("#set-answer").disabled = !setPick;
 });
 
 async function setAnswer() {
   const it = st.SET.items[setAt];
   const value = it.kind === "choice" ? setPick : $("#set-short-text").value;
-  if (it.kind === "choice" && (!value || !setConf)) return;
+  if (it.kind === "choice" && !value) return;
   $("#set-answer").disabled = true;
   try {
     const body = { item: it.id, value };
-    if (it.kind === "choice") body.confidence = setConf;
+    if (it.kind === "choice") body.unsure = [...setUnsure];
     const { set } = await api(`/api/sets/${st.SET.id}/answer`, { method: "POST", body });
     st.SET = set;
     resumeDeferred(set.id, it.id);

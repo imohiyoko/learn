@@ -244,7 +244,7 @@ class Handler(BaseHTTPRequestHandler):
             m = re.match(r"^/api/sets/([^/]+)/answer$", path)
             if m:
                 s = answer_set_item(m.group(1), str(body.get("item") or ""), body.get("value"),
-                                    body.get("confidence"))
+                                    body.get("unsure"))
                 return self.send_json({"set": set_view(s)})
             m = re.match(r"^/api/sets/([^/]+)/ask$", path)
             if m:

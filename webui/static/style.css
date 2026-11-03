@@ -165,8 +165,10 @@ body:has(.timer:not([hidden])) main { padding-bottom: 72px; }
 .options button.right { border: 2px solid var(--strong); }
 .options button.wrong { border: 2px solid var(--weak); }
 .options button:disabled { opacity: 1; cursor: default; }
-.conf { margin: 8px 0 12px; }
-.conf button.sel { border: 2px solid var(--accent); background: var(--user); }
+.options .opt-row { display: flex; gap: 6px; align-items: stretch; }
+.options .opt-row > [data-opt] { flex: 1; }
+.options button.unsure { flex: none; justify-content: center; align-items: center; padding: 0 12px; font-weight: 700; color: var(--muted); }
+.options button.unsure.on { border: 2px solid var(--weak); color: var(--weak); background: var(--bg); }
 .feedback { border-left: 4px solid var(--line); padding: 8px 12px; margin: 8px 0; background: var(--bg); border-radius: 0 8px 8px 0; }
 .feedback.ok { border-left-color: var(--strong); }
 .feedback.ng { border-left-color: var(--weak); }
