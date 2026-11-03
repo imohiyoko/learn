@@ -7,7 +7,7 @@ import threading
 from collections import Counter
 from datetime import datetime
 
-from learn import core, route
+from learn import core, fill, route
 from learn.web import files
 from learn.web.files import TAG_RE, append_jsonl, now_iso, read_jsonl, safe_child
 from learn.web.glossary import known_meaning, term_key
@@ -35,10 +35,11 @@ def bank_item(iid):
             options.append({"label": m.group(1), "text": m.group(2).strip()})
         else:
             lines.append(line)
+    body = "\n".join(lines).strip()
     return {"id": iid, "kind": meta.get("kind"), "tags": core.parse_list(meta.get("tags")),
             "concepts": core.parse_list(meta.get("concepts")), "difficulty": meta.get("difficulty"),
             "time_min": meta.get("time_min"), "verified": meta.get("verified") == "true",
-            "body": "\n".join(lines).strip(), "options": options}
+            "body": body, "options": options, "blanks": fill.blanks(body) if meta.get("kind") == "fill" else []}
 
 
 def bank_key(iid):
@@ -85,7 +86,8 @@ def bank_status():
             "unverified": len(st["unverified"]), "model": route.model(files.ROOT, pass_ratio=pr), "stock": st}
 
 
-SET_KINDS = {"mixed": ("choice", "short"), "choice": ("choice",)}  # 「今日のセット」と、択一だけのドリル
+SET_KINDS = {"mixed": ("choice", "fill", "short"), "choice": ("choice",)}  # 「今日のセット」と、択一だけのドリル
+AUTO_KINDS = ("choice", "fill")  # 答えたその場で正解キーと照らして採点する形式
 
 
 def create_set(n=10, tag=None, kind="mixed"):
@@ -96,7 +98,9 @@ def create_set(n=10, tag=None, kind="mixed"):
     if not 1 <= n <= 30:
         raise ValueError("問題数は1〜30です")
     with SET_LOCK:  # 同時に作っても、同じ問題が2つのセットに入らないように
-        r = route.route(files.ROOT, n=n, kinds=SET_KINDS[kind], tag=tag or None,
+        # 穴埋めは、profile に「穴埋め問題」の節があるときだけ出す（節を消せば、バンクに残っていても出さない）
+        kinds = tuple(k for k in SET_KINDS[kind] if k != "fill" or core.has_section(files.PROFILE, "穴埋め問題"))
+        r = route.route(files.ROOT, n=n, kinds=kinds, tag=tag or None,
                         pass_ratio=core.parse_pass_ratio(files.PROFILE), exclude=busy_items())
         if not r["items"]:
             raise RuntimeError("出せる問題がバンクにありません。「問題バンクを作る」で用意してください")
@@ -132,7 +136,7 @@ def list_sets():
         out.append({"id": s["id"], "created": s.get("created"), "status": set_status(s), "phase": s.get("phase"),
                     "n": len(s["items"]), "answered": len(s.get("answers", {})),
                     "correct": sum(1 for r in res.values() if r.get("correct")),
-                    "choices": sum(1 for it in s["items"] if it["kind"] == "choice"),
+                    "choices": sum(1 for it in s["items"] if it["kind"] in AUTO_KINDS),
                     "report": (files.REPORTS / f"{s['id']}.md").is_file()})
     return sorted(out, key=lambda x: x["id"], reverse=True)
 
@@ -144,7 +148,7 @@ def set_status(s):
 
 
 def set_view(s):
-    """画面に出すセット。正解と解説は、答えた択一と、採点の終わった記述にだけ付ける"""
+    """画面に出すセット。正解と解説は、答えた択一・穴埋めと、採点の終わった記述にだけ付ける"""
     status = set_status(s)
     names = concept_names()
     results = dict(s.get("results", {}))
@@ -155,10 +159,10 @@ def set_view(s):
     items = []
     for it in s["items"]:
         b = bank_item(it["id"]) or {"id": it["id"], "body": "（問題が見つかりません）", "options": []}
-        v = {**it, "body": b["body"], "options": b["options"], "concept_names": [names.get(c, c) for c in it["concepts"]],
+        v = {**it, "body": b["body"], "options": b["options"], "blanks": b.get("blanks", []), "concept_names": [names.get(c, c) for c in it["concepts"]],
              "answer": s.get("answers", {}).get(it["id"]), "result": results.get(it["id"])}
         # 正解が複数ありうるとして確認待ちに戻した問題（verified: false）は、正解を出さない
-        if ((it["kind"] == "choice" and v["result"]) or status == "graded") and b.get("verified", True):
+        if ((it["kind"] in AUTO_KINDS and v["result"]) or status == "graded") and b.get("verified", True):
             k = bank_key(it["id"])
             if k:
                 v["key"] = {"answer": k["meta"].get("answer"), "body": k["body"]}
@@ -190,6 +194,10 @@ def answer_set_item(sid, iid, value, unsure=None):
         it = next((x for x in s["items"] if x["id"] == iid), None)
         if not it:
             raise LookupError("その問題はこのセットにありません")
+        if it["kind"] == "fill":
+            answer_fill(s, sid, iid, it, value)
+            save_set(s)
+            return s
         value = str(value or "").strip()
         if it["kind"] == "choice":
             if iid in s["results"]:
@@ -230,6 +238,31 @@ def answer_set_item(sid, iid, value, unsure=None):
             (d / f"{iid}.md").write_text(value + "\n", encoding="utf-8")
         save_set(s)
         return s
+
+
+def answer_fill(s, sid, iid, it, value):
+    """穴埋めを、正解キーの空欄ごとの正解（と別解）と照らして採点する。value は {記号: 答え}"""
+    if iid in s["results"]:
+        raise RuntimeError("この問題はもう答えています")
+    b, k = bank_item(iid), bank_key(iid)
+    key = fill.key_answers(k["body"]) if k else {}
+    if not b or not b["blanks"] or any(x not in key for x in b["blanks"]):
+        raise LookupError("正解キーがありません")
+    if not isinstance(value, dict) or not all(isinstance(v, str) and len(v) <= fill.MAX_ANSWER for v in value.values()):
+        raise ValueError(f"空欄ごとに{fill.MAX_ANSWER}字以内で答えてください")
+    if not any(str(value.get(x) or "").strip() for x in b["blanks"]):
+        raise ValueError("空欄に答えを書いてください")
+    graded = fill.grade(b["blanks"], key, value)
+    got = sum(1 for g in graded.values() if g["ok"])
+    correct = got == len(graded)
+    names = concept_names()
+    append_jsonl(files.LOGS["bank"][0], {
+        "id": f"{sid}-{iid}", "set": sid, "item": iid, "kind": "fill", "tags": it["tags"] or ["unknown"],
+        "concepts": it["concepts"], "difficulty": it["difficulty"], "score": got, "max": len(graded),
+        "answer": " / ".join(f"{x}={g['answer']}" for x, g in graded.items()), "blanks": graded, "graded_at": now_iso(),
+        "weak": [] if correct else [names.get(c, c) for c in it["concepts"][:1]], "miss_type": {}})
+    s["answers"][iid] = {x: g["answer"] for x, g in graded.items()}
+    s["results"][iid] = {"correct": correct, "score": got, "max": len(graded), "blanks": graded, "graded_at": now_iso()}
 
 
 WORD_RE = re.compile(r"[\x00-\x1f\x7f]")

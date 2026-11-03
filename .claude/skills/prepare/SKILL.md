@@ -16,12 +16,13 @@ description: 問題バンク（bank/）を前もって作る。論点の一覧�
    - `exam/concepts.md` がなければ、`templates/concepts.md` の形で作る。分野タグごとに論点を4〜8個。`refs/syllabus/` にシラバスがあれば、それに沿って分ける。論点は「1問の択一で1つ問える」くらいの粒度にする
    - 作ったら（または論点を足したら）、論点の一覧を返事の最初に短く示す。学習者は `exam/concepts.md` を直してよい
 2. **足りない数を調べる**
-   - `python3 scripts/route.py --stock --json` を実行する。論点ごとの `need`（択一 `choice`・短い記述 `short`）と、分野ごとの長文 `long` の `need` が、作る数
+   - `python3 scripts/route.py --stock --json` を実行する。論点ごとの `need`（択一 `choice`・短い記述 `short`、profile に「穴埋め問題」の節があれば穴埋め `fill`）と、分野ごとの長文 `long` の `need` が、作る数
    - 引数にタグがあれば、その分野だけ。足りない論点が多いときは、`python3 scripts/route.py --model --json` で見込みが低い・まだ測れていない論点を先にする
    - `unverified`（確認待ち）の問題があれば、新しく作る前に手順4だけ済ませる
 3. **作る**（上限の数まで。正解キーを先に作る）
-   - id：択一 `b-<タグ>-<論点の語>-c<番号>`、短い記述 `-s<番号>`、長文 `b-<タグ>-l<番号>`。同じ id のファイルがあれば番号を進める
+   - id：択一 `b-<タグ>-<論点の語>-c<番号>`、穴埋め `-f<番号>`、短い記述 `-s<番号>`、長文 `b-<タグ>-l<番号>`。同じ id のファイルがあれば番号を進める
    - 択一：`templates/bank/choice-key.md` の形で `bank/keys/<id>.md` を書いてから、`templates/bank/choice.md` の形で `bank/items/<id>.md` を書く（`verified: false`）。1つの論点の3問は難しさ 1・2・3 を1問ずつにし、問う角度（意味・仕組み・当てはめ）を変える。選択肢は、正解は1つ、誤りは「よくある誤解」「似た用語」「条件違い」、「すべて正しい」「いずれでもない」は使わない、正解の位置を偏らせない（同じ記号が3問以上続かない）
+   - 穴埋め：`templates/bank/fill-key.md` → `templates/bank/fill.md`。答えが数字か語句1つに決まる空欄を、全角の［ア］［イ］…で置く（表の中でもよい。仕訳なら借方・貸方の科目と金額）。正解キーの「## 正解」に空欄ごとの正解と別解を書く。サーバーは書き方の違い（カンマ・円・全角半角）しか吸収しないので、言い換えが考えられる語句は別解に並べるか、語群を問題文に付けて選ばせる。1つの論点の2問は難しさを変える
    - 短い記述：`templates/bank/short-key.md` → `templates/bank/short.md`。5〜10行の事例と設問1つ、20〜60字、10点。事例に根拠を必ず書く
    - 長文：本番形式の記述式。正解キーは `templates/rubric.md` の形（配点合計100点）、問題は `templates/question.md` の形で、`bank/keys/<id>.md` → `bank/items/<id>.md` の順に保存する。front matter に `kind: long`、`concepts: [<この問題で問う論点ID。2〜4個>]`、`difficulty: 2`、`time_min`（profile の目安時間）を足し、`tags` は主タグを先頭に書く
      - `exam/profile.md` の出題形式（本文の長さ・設問数・字数制限）に沿って設計する

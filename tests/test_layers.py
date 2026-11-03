@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # モジュール → 読んでよい learn のモジュール
 ALLOWED = {
     "core": set(),
+    "fill": set(),
     "model": set(),
     "stats": {"core"},
     "analyze": {"core", "model"},
@@ -23,7 +24,7 @@ ALLOWED = {
 WEB_ALLOWED = {
     "files": set(),
     "glossary": {"files"},
-    "sets": {"files", "glossary"},
+    "sets": {"files", "glossary"},  # learn.fill・learn.route も読む（web の外の部品）
     "refs": {"files"},
     "jobs": {"files", "sets"},
     "home": {"files", "jobs", "sets"},

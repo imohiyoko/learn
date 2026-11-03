@@ -30,17 +30,18 @@
 | `rubrics/<id>.md` | `templates/rubric.md` | `/question`（バンクからコピー）・`/import-past` | `/grade`・grader。**採点が終わるまで学習者に見せない** |
 | `answers/<id>.md` | `templates/answer.md`。`## 設問N` / `(n)` の見出しで欄を分ける | 学習者・web UI | `/grade`・web UI |
 | `results/<id>.md` | `templates/result.md` | `/grade` | 学習者・web UI |
-| `bank/items/<id>.md` | `templates/bank/choice.md`・`templates/bank/short.md`。front matter の `kind`・`tags`・`concepts`・`difficulty`・`verified` | `/prepare` | `scripts/route.py`・web UI・`/question`・`/drill`・verifier |
-| `bank/keys/<id>.md` | `templates/bank/choice-key.md`・`templates/bank/short-key.md` | `/prepare` | web UI（択一の答え合わせ）・`/grade-set`・grader。**答えるまで見せない** |
+| `bank/items/<id>.md` | `templates/bank/choice.md`・`templates/bank/fill.md`・`templates/bank/short.md`。front matter の `kind`・`tags`・`concepts`・`difficulty`・`verified` | `/prepare` | `scripts/route.py`・web UI・`/question`・`/drill`・verifier |
+| `bank/keys/<id>.md` | `templates/bank/choice-key.md`・`templates/bank/fill-key.md`・`templates/bank/short-key.md` | `/prepare` | web UI（択一・穴埋めの答え合わせ）・`/grade-set`・grader。**答えるまで見せない** |
 | `sets/<set>/set.json` | セットの問題と答え | web UI | `/grade-set`・web UI |
 | `reports/<set>.md` | `templates/report.md` | `/grade-set` | 学習者・web UI |
-| `exam/profile.md` | `templates/profile.md`。「分野タグ」「択一問題」の節 | `/setup-exam` | すべてのスキル・`scripts/`・web UI |
+| `exam/profile.md` | `templates/profile.md`。「分野タグ」「択一問題」「穴埋め問題」の節 | `/setup-exam` | すべてのスキル・`scripts/`・web UI |
 | `exam/concepts.md` | `templates/concepts.md`。`\| タグ \| 論点ID \| 論点 \| 重み \|` の表 | `/prepare` | `scripts/route.py`・web UI |
 
 web UI が本文から読み取る書き方：
 
 - 解答欄：問題の `## 設問` の節にある `**設問N**`・`(n)`・`N字以内`（`webui/static/answer.js`）
 - 択一の選択肢：`- ア <選択肢>` の形の行（`learn/web/sets.py` の `CHOICE_RE`）
+- 穴埋めの空欄：問題文の全角の `［ア］`。正解キーの「## 解説」より前の `- ア：<正解>｜<別解>` の行（`learn/fill.py`）。答えはカンマ・「円」・全角半角・△▲ をそろえて比べる
 - 解答中の質問の設問：`設問N` か `設問N(n)`（`learn/web/glossary.py` の `PART_RE`）
 
 ## スキルを足す・変えるとき
