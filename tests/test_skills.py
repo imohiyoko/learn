@@ -10,9 +10,9 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "webui"))
+sys.path.insert(0, str(ROOT))
 
-import server  # noqa: E402
+from learn.web import jobs  # noqa: E402
 
 SKILLS = ROOT / ".claude" / "skills"
 AGENTS = ROOT / ".claude" / "agents"
@@ -73,7 +73,7 @@ class SkillsTest(unittest.TestCase):
 
     def test_web_ui_allows_scripts(self):
         # web UI から `claude -p` で呼ぶスキルは、許可したコマンドしか使えない
-        allowed = set(server.ALLOWED_TOOLS)
+        allowed = set(jobs.ALLOWED_TOOLS)
         for doc in DOCS:
             for script, _ in SCRIPT_CALL_RE.findall(doc.read_text(encoding="utf-8")):
                 with self.subTest(script=script):

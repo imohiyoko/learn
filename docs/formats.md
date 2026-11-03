@@ -40,12 +40,12 @@
 web UI が本文から読み取る書き方：
 
 - 解答欄：問題の `## 設問` の節にある `**設問N**`・`(n)`・`N字以内`（`webui/static/answer.js`）
-- 択一の選択肢：`- ア <選択肢>` の形の行（`webui/server.py` の `CHOICE_RE`）
-- 解答中の質問の設問：`設問N` か `設問N(n)`（`webui/server.py` の `PART_RE`）
+- 択一の選択肢：`- ア <選択肢>` の形の行（`learn/web/sets.py` の `CHOICE_RE`）
+- 解答中の質問の設問：`設問N` か `設問N(n)`（`learn/web/glossary.py` の `PART_RE`）
 
 ## スキルを足す・変えるとき
 
 - `.claude/skills/<名前>/SKILL.md` の front matter に `name`（フォルダ名と同じ）と `description` を書く
 - CLAUDE.md の「スキル」の一覧に足す
-- スクリプトを呼ぶなら、web UI から呼ばれたときに使えるよう `webui/server.py` の `ALLOWED_TOOLS` に入っているか確かめる
+- スクリプトを呼ぶなら、web UI から呼ばれたときに使えるよう `learn/web/jobs.py` の `ALLOWED_TOOLS` に入っているか確かめる
 - `tests/test_skills.py` が、この3つと、スキルの書いているファイル・スクリプトの引数が実際にあるかを確かめる
