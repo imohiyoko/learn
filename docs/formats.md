@@ -49,3 +49,10 @@ web UI が本文から読み取る書き方：
 - CLAUDE.md の「スキル」の一覧に足す
 - スクリプトを呼ぶなら、web UI から呼ばれたときに使えるよう `webui/server.py` の `ALLOWED_TOOLS` に入っているか確かめる
 - `tests/test_skills.py` が、この3つと、スキルの書いているファイル・スクリプトの引数が実際にあるかを確かめる
+
+## 択一の確信度（`confidence`）
+
+- 択一を答えるとき、画面で「根拠がわかる（`sure`）／消去法（`narrowed`）／勘（`guess`）」を選ばせ、`log/bank.jsonl` の1行に任意の `confidence` として書く。別ファイルにはしない
+- 確信度のない行（この機能より前の記録、`/drill` の記録）は「不明」として扱う。あとから書き足さない
+- `scripts/route.py` の見込みでは、○でも `narrowed`・`guess` は動かす強さを下げ（0.6・0.3）、×で `sure` は強く（1.3）、×で `guess` は弱く（0.7）効かせる。不明は 1.0（`learn/route.py` の `CONF_WEIGHT_*`）
+- `scripts/analyze.py`（分野ごとの分析）は、いまは確信度を使わない

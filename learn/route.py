@@ -47,6 +47,10 @@ ROOT = core.ROOT
 V_MEASURED = 0.45            # v がこれ以下になったら「測れた」とみなす
 DIFF_B = {1: -0.8, 2: 0.0, 3: 0.8}
 KIND_WEIGHT = {"choice": 1.0, "short": 1.5, "long": 1.0}
+# 択一の確信度（自己申告）で、その1問が見込みを動かす強さを変える。ない行は 1.0（不明）。
+# ○でも勘・消去法なら理解の証拠として弱く、根拠があると思って×なら思い込みとして強く効かせる。
+CONF_WEIGHT_RIGHT = {"sure": 1.0, "narrowed": 0.6, "guess": 0.3}
+CONF_WEIGHT_WRONG = {"sure": 1.3, "narrowed": 1.0, "guess": 0.7}
 TARGET_P = 0.65              # 穴埋めで狙う正答率
 RETRY_DAYS = (1, 3, 7)       # 間違えた回数ごとの、やり直すまでの日数
 REVIEW_AFTER_DAYS = 7        # 得意な論点を確認に出すまでの日数
@@ -152,6 +156,9 @@ def build_model(concepts, results, exclude_set=None):
         y = min(max(r["score"] / r["max"], 0.0), 1.0)
         b = DIFF_B.get(r.get("difficulty"), 0.0)
         w = KIND_WEIGHT.get(r.get("kind"), 1.0) / len(r["concepts"])  # 長文は論点の数で割る
+        if r.get("kind") == "choice":
+            table = CONF_WEIGHT_RIGHT if y >= 0.5 else CONF_WEIGHT_WRONG
+            w *= table.get(r.get("confidence"), 1.0)
         for c in r["concepts"]:
             m = models.setdefault(c, new_model())
             update(m, y, b, w)

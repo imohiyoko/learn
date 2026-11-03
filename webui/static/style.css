@@ -165,6 +165,8 @@ body:has(.timer:not([hidden])) main { padding-bottom: 72px; }
 .options button.right { border: 2px solid var(--strong); }
 .options button.wrong { border: 2px solid var(--weak); }
 .options button:disabled { opacity: 1; cursor: default; }
+.conf { margin: 8px 0 12px; }
+.conf button.sel { border: 2px solid var(--accent); background: var(--user); }
 .feedback { border-left: 4px solid var(--line); padding: 8px 12px; margin: 8px 0; background: var(--bg); border-radius: 0 8px 8px 0; }
 .feedback.ok { border-left-color: var(--strong); }
 .feedback.ng { border-left-color: var(--weak); }

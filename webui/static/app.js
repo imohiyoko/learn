@@ -537,7 +537,7 @@
   // ---------------------------------------------------------- セット（問題バンク）
   // scripts/route.py が選んだ問題を1問ずつ。択一は答えたその場でサーバーが採点して解説を出す。
   // 記述は書いて保存し、最後に提出すると /grade-set が採点とレポートを作る
-  let SET = null, setAt = 0, setPick = null, setGen = 0;
+  let SET = null, setAt = 0, setPick = null, setConf = null, setGen = 0;
   const SLOT_HELP = { "洗い出し": "まだ測れていない論点", "穴埋め": "苦手な論点", "やり直し": "前に間違えた問題", "確認": "得意な論点の確認" };
 
   async function newSet(opts) {
@@ -595,6 +595,7 @@
     if (setAt >= s.items.length) return drawFinish();
     const it = s.items[setAt];
     setPick = null;
+    setConf = null;
     $("#set-reason").textContent = `${setAt + 1} / ${s.items.length}・${it.kind === "choice" ? "択一" : "記述"}・${it.slot}（${SLOT_HELP[it.slot] || ""}）・${it.reason}`;
     $("#set-body").innerHTML = md.render(it.body).html;
     const answered = it.kind === "choice" && !!it.result;
@@ -615,8 +616,14 @@
     fb.hidden = !answered;
     if (answered) {
       fb.className = "feedback md " + (it.result.correct ? "ok" : "ng");
-      fb.innerHTML = `<p><b>${it.result.correct ? "正解" : "不正解"}</b>（あなたの答え：${esc(it.answer)}・正解：${esc(right || "")}）</p>` + md.render(it.key ? it.key.body : "").html;
+      const c = it.result.confidence;
+      const confNote = it.result.correct && (c === "guess" || c === "narrowed")
+        ? `<p class="small">${c === "guess" ? "勘" : "消去法"}で選んだ問題です。当たっても理解の確認にはなりません。解説の各選択肢を読んで、理由を言えるか確かめましょう。</p>`
+        : !it.result.correct && c === "sure" ? `<p class="small">根拠があると思って選んだ問題です。思い込みのずれがここにあります。解説の「${esc(it.answer)}」の行を読みましょう。</p>` : "";
+      fb.innerHTML = `<p><b>${it.result.correct ? "正解" : "不正解"}</b>（あなたの答え：${esc(it.answer)}・正解：${esc(right || "")}）</p>` + confNote + md.render(it.key ? it.key.body : "").html;
     }
+    $("#set-conf").hidden = it.kind !== "choice" || s.status !== "open" || answered;
+    $$("#set-conf button").forEach((x) => x.classList.remove("sel"));
     $("#set-answer").hidden = s.status !== "open" || answered;
     $("#set-answer").textContent = it.kind === "choice" ? "答える" : "保存して次へ";
     $("#set-answer").disabled = it.kind === "choice";
@@ -701,18 +708,26 @@
     if (!b || b.disabled) return;
     setPick = b.dataset.opt;
     $$("#set-options button").forEach((x) => x.classList.toggle("sel", x === b));
-    $("#set-answer").disabled = false;
+    $("#set-answer").disabled = !setConf;
     timerAutoStart();
   });
-  $("#set-options").addEventListener("dblclick", (e) => { if (e.target.closest("[data-opt]") && setPick) setAnswer(); });
+  $("#set-conf").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-conf]");
+    if (!b) return;
+    setConf = b.dataset.conf;
+    $$("#set-conf button").forEach((x) => x.classList.toggle("sel", x === b));
+    $("#set-answer").disabled = !setPick;
+  });
 
   async function setAnswer() {
     const it = SET.items[setAt];
     const value = it.kind === "choice" ? setPick : $("#set-short-text").value;
-    if (it.kind === "choice" && !value) return;
+    if (it.kind === "choice" && (!value || !setConf)) return;
     $("#set-answer").disabled = true;
     try {
-      const { set } = await api(`/api/sets/${SET.id}/answer`, { method: "POST", body: { item: it.id, value } });
+      const body = { item: it.id, value };
+      if (it.kind === "choice") body.confidence = setConf;
+      const { set } = await api(`/api/sets/${SET.id}/answer`, { method: "POST", body });
       SET = set;
       resumeDeferred(set.id, it.id);
       if (it.kind === "short") setAt++;

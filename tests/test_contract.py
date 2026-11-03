@@ -102,6 +102,18 @@ class ServerLinesTest(unittest.TestCase):
             server.answer_set_item(s["id"], it["id"], "ア")
         self.check("bank.jsonl", "bank-line")
 
+    def test_bank_choice_confidence(self):
+        s = server.create_set(n=3, kind="choice")
+        a, b, c = [it["id"] for it in s["items"]]
+        server.answer_set_item(s["id"], a, "ア", "guess")
+        server.answer_set_item(s["id"], b, "ア", "sure")
+        with self.assertRaises(ValueError):
+            server.answer_set_item(s["id"], c, "ア", "maybe")
+        server.answer_set_item(s["id"], c, "ア")  # 確信度なしの古い呼び出しも受ける
+        self.check("bank.jsonl", "bank-line")
+        rows = [json.loads(x) for x in (server.ROOT / "log" / "bank.jsonl").read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([r.get("confidence") for r in rows], ["guess", "sure", None])
+
 
 if __name__ == "__main__":
     unittest.main()
