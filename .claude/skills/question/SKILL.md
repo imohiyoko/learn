@@ -5,7 +5,7 @@ description: 記述式の練習問題を1問出題する。問題バンクの長
 
 # 出題
 
-引数：任意で分野タグ（例：`/question web`）、または `past-<年度>-<問番号>`（`/import-past` で取り込み済みの過去問。例：`/question past-r06a-q1`）。
+引数：任意で分野タグ（例：`/question <タグ>`）、または `past-<年度>-<問番号>`（`/import-past` で取り込み済みの過去問。例：`/question past-r06a-q1`）。
 
 問題はその場で作らない。`/prepare` で前もって作り、verifier の確認を通した問題バンク（`bank/`）の長文から、`scripts/route.py` が選んだものを出す（自分で選び直さない）。バンクに長文がなければ知らせて終わる。作り足すのは学習者が好きなときに `/prepare` で行う。
 

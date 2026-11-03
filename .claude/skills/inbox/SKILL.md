@@ -11,7 +11,7 @@ description: ブラウザの画面（webui/）から inbox/ に置かれた依�
 
 ```
 inbox/<job>/meta.json        {"title": 画面での名前, "created": ..., "target": 採点対象の id（採点のときだけ）}
-inbox/<job>/000-user.md      最初の依頼。本文はスラッシュコマンド（/question web、/drill auth 5、/grade <id>、/grade-set <set>、/prepare web、/review、/import-past r06a q1、/setup-exam）
+inbox/<job>/000-user.md      最初の依頼。本文はスラッシュコマンド（/question <タグ>、/drill <タグ> 5、/grade <id>、/grade-set <set>、/prepare <タグ>、/review、/import-past r06a q1、/setup-exam）
 inbox/<job>/000-claude.md    あなたの返事（これを書くと「処理済み」になる）
 inbox/<job>/001-user.md      学習者の返信（択一の「1ア 2ウ …」、setup-exam の質問への答えなど）
 inbox/<job>/001-claude.md    その返事

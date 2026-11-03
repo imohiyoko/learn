@@ -15,7 +15,7 @@
 
 `exam/profile.md` がない、または `<!-- TODO -->` が残っているなら、まず `/setup-exam` を案内すること。
 
-学習データ（`exam/`・`questions/`・`rubrics/`・`answers/`・`results/`・`log/`・`refs/`・`inbox/`・`bank/`・`sets/`・`reports/`）は `.gitignore` で追跡対象外にしている。雛形だけを共有するリポジトリなので、これらを `git add -f` しない。
+学習データ（`exam/`・`examples/`・`questions/`・`rubrics/`・`answers/`・`results/`・`log/`・`refs/`・`inbox/`・`bank/`・`sets/`・`reports/`）は `.gitignore` で追跡対象外にしている。雛形だけを共有するリポジトリなので、これらを `git add -f` しない。
 
 ## ディレクトリの約束
 
@@ -36,7 +36,7 @@
 | `questions/assets/` | 問題の図（画像・SVG） | 見せる |
 | `templates/` | 各ファイルのひな形 | — |
 
-`<id>` は、生成問題なら `YYYYMMDD-HHMM-<主タグ>`（例：`20261025-2130-web`）、取り込んだ過去問なら `past-<年度>-<問番号>`（例：`past-r06a-q1`）。問題バンクの問題は `b-...`、セットは `set-YYYYMMDD-HHMMSS`（`/prepare` と `/drill` を参照）。
+`<id>` は、生成問題なら `YYYYMMDD-HHMM-<主タグ>`（例：`20261025-2130-topic`）、取り込んだ過去問なら `past-<年度>-<問番号>`（例：`past-r06a-q1`）。問題バンクの問題は `b-...`、セットは `set-YYYYMMDD-HHMMSS`（`/prepare` と `/drill` を参照）。
 
 **問題はその場で作らない。** 記述式（`/question`）も択一（`/drill`）も、`/prepare` で作って verifier の確認を通した `bank/` の問題だけを出す。在庫が足りなければ、ある分だけ出して `/prepare` を案内する（作り足すかどうか・いつ作るかは学習者が決める。出題の途中で勝手に作らない）。例外は `/import-past` の公式過去問。
 
@@ -68,7 +68,7 @@
 
 ## ブラウザから使われるとき
 
-`webui/server.py`（中身は `learn/web/`）は、ブラウザで選ばれた操作を `inbox/` に置き（`/inbox` スキルで処理する）、または `claude -p "/question web"` のようにスキルとして呼ぶ。スキルの手順・ファイルの置き場所・記録の形式を変えるときは、`webui/` が読むもの（`questions/` `answers/` `results/` の `<id>.md`。解答欄は問題の「## 設問」にある `**設問N**`・`(n)`・`N字以内` から作り、`answers/<id>.md` の `## 設問N` / `(n)` の見出しで欄に戻す、`log/*.jsonl`、`exam/profile.md` の「分野タグ」「択一問題」の節）を壊さないこと。
+`webui/server.py`（中身は `learn/web/`）は、ブラウザで選ばれた操作を `inbox/` に置き（`/inbox` スキルで処理する）、または `claude -p "/question <タグ>"` のようにスキルとして呼ぶ。スキルの手順・ファイルの置き場所・記録の形式を変えるときは、`webui/` が読むもの（`questions/` `answers/` `results/` の `<id>.md`。解答欄は問題の「## 設問」にある `**設問N**`・`(n)`・`N字以内` から作り、`answers/<id>.md` の `## 設問N` / `(n)` の見出しで欄に戻す、`log/*.jsonl`、`exam/profile.md` の「分野タグ」「択一問題」の節）を壊さないこと。
 
 ## 画像
 

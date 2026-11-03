@@ -6,7 +6,7 @@ Claude がその場で分野を選ぶと、選び方が毎回ぶれて苦手を�
 
 使い方:
   python3 scripts/route.py                   次のセット（択一と短い記述、10問）を表示
-  python3 scripts/route.py --n 6 --tag web   分野をしぼる
+  python3 scripts/route.py --n 6 --tag <タグ>   分野をしぼる
   python3 scripts/route.py --kinds long      本番形式の長い記述を1問選ぶ（/question が使う）
   python3 scripts/route.py --model           論点ごとの見込みを表示
   python3 scripts/route.py --stock           論点ごとのバンクの在庫と、足りない数を表示（/prepare が使う）

@@ -14,6 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+FIXTURE = ROOT / "tests" / "fixtures" / "profile.md"
 
 from learn.web import app, files, jobs  # noqa: E402
 
@@ -22,7 +23,8 @@ class WebUITest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tmp = Path(tempfile.mkdtemp())
-        shutil.copytree(ROOT / "examples", cls.tmp / "examples")
+        (cls.tmp / "examples" / "sample").mkdir(parents=True)
+        shutil.copyfile(FIXTURE, cls.tmp / "examples" / "sample" / "profile.md")
         for d in ("exam", "questions", "rubrics", "answers", "results", "log"):
             (cls.tmp / d).mkdir()
         files.configure(cls.tmp)
@@ -64,12 +66,12 @@ class WebUITest(unittest.TestCase):
         # 試験の設定前は出題できない
         _, st = self.call("/api/state")
         self.assertEqual(st["profile"], "missing")
-        self.assertIn("sc", [e["key"] for e in st["examples"]])
+        self.assertIn("sample", [e["key"] for e in st["examples"]])
         code, _ = self.call("/api/run", "POST", {"action": "question"})
         self.assertEqual(code, 409)
 
         # サンプルからコピー
-        code, _ = self.call("/api/setup-example", "POST", {"key": "sc"})
+        code, _ = self.call("/api/setup-example", "POST", {"key": "sample"})
         self.assertEqual(code, 200)
         _, st = self.call("/api/state")
         self.assertEqual(st["profile"], "ok")
@@ -150,7 +152,7 @@ class WebUITest(unittest.TestCase):
         base, self.base = self.base, f"http://127.0.0.1:{srv.server_address[1]}"
         try:
             (self.tmp / "exam" / "profile.md").write_text(
-                (self.tmp / "examples" / "sc" / "profile.md").read_text(encoding="utf-8"), encoding="utf-8")
+                FIXTURE.read_text(encoding="utf-8"), encoding="utf-8")
             _, st = self.call("/api/state")
             self.assertEqual(st["runner"], "loop")
             code, r = self.call("/api/run", "POST", {"action": "question", "tag": "web"})
@@ -256,7 +258,7 @@ class WebUITest(unittest.TestCase):
         self.assertEqual(st["profile"], "todo")
         code, _ = self.call("/api/run", "POST", {"action": "review"})
         self.assertEqual(code, 409)
-        prof.write_text((self.tmp / "examples" / "sc" / "profile.md").read_text(encoding="utf-8"), encoding="utf-8")
+        prof.write_text(FIXTURE.read_text(encoding="utf-8"), encoding="utf-8")
 
         # 同じ記述問題を採点し直したら、履歴には最新の点数だけを出す
         qid = "20261103-0900-web"
