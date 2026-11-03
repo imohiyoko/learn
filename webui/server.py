@@ -8,7 +8,7 @@
   --runner loop（既定）  依頼を inbox/ に置く。このフォルダで動かしている Claude Code が
                          `/loop 1m /inbox` で拾って処理し、返事を inbox/ に書く
   --runner cli           このサーバーが `claude -p "/question web"` を起動して処理する
-                         （Docker など、常駐の Claude Code がないとき）
+                         （常駐の Claude Code を用意しないとき。API キーでも動く）
 
 使い方:
   python3 webui/server.py                 http://127.0.0.1:8765 で起動
@@ -802,19 +802,17 @@ class Server6(Server):
     address_family = socket.AF_INET6
 
 
-def make_server(host="127.0.0.1", port=8765, token=None, allow_no_token=False, runner="loop"):
+def make_server(host="127.0.0.1", port=8765, token=None, runner="loop"):
     if runner not in RUNNERS:
         raise SystemExit(f"--runner は {' / '.join(RUNNERS)} のどれかです")
-    if host not in LOOPBACK and not token and not allow_no_token:
-        raise SystemExit("127.0.0.1 以外で待ち受けるときは LEARN_TOKEN を設定してください"
-                         "（ポートを 127.0.0.1 にしか出さない Docker などでは --allow-no-token）")
+    if host not in LOOPBACK and not token:
+        raise SystemExit("127.0.0.1 以外で待ち受けるときは LEARN_TOKEN を設定してください")
     # 設定はサーバーごとに持つ（同じプロセスで複数作っても混ざらないように）
     handler = type("BoundHandler", (Handler,), {
         "token": token or None,
         "runner": runner,
         "jobs": RUNNERS[runner](),
-        # トークンなしなら、Host が localhost のリクエストだけを受ける。127.0.0.1 で待ち受けるときの
-        # DNS rebinding 対策と、--allow-no-token のままポートを外に出してしまったときの歯止めを兼ねる
+        # 127.0.0.1 で待ち受けるときは、Host が localhost のリクエストだけを受ける（DNS rebinding 対策）
         "allowed_hosts": LOOPBACK if (host in LOOPBACK or not token) else None,
     })
     cls = Server6 if ":" in host else Server
@@ -825,13 +823,11 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--host", default=os.environ.get("LEARN_HOST", "127.0.0.1"))
     ap.add_argument("--port", type=int, default=int(os.environ.get("LEARN_PORT", "8765")))
-    ap.add_argument("--allow-no-token", action="store_true",
-                    help="127.0.0.1 以外でもトークンなしで待ち受ける（外から届かない環境だけで使う）")
     ap.add_argument("--runner", choices=sorted(RUNNERS), default=os.environ.get("LEARN_RUNNER", "loop"),
                     help="loop：依頼を inbox/ に置き、常駐している Claude Code（/loop 1m /inbox）に処理させる（既定）。"
                          "cli：このサーバーが claude -p を起動して処理する")
     args = ap.parse_args()
-    srv = make_server(args.host, args.port, os.environ.get("LEARN_TOKEN"), args.allow_no_token, args.runner)
+    srv = make_server(args.host, args.port, os.environ.get("LEARN_TOKEN"), args.runner)
     shown = "127.0.0.1" if args.host in ("0.0.0.0", "::") else args.host
     print(f"learn web UI: http://{shown}:{args.port}/" + ("?token=..." if os.environ.get("LEARN_TOKEN") else ""))
     if args.runner == "loop":

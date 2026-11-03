@@ -92,18 +92,6 @@ LEARN_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))") pyt
 
 インターネットに直接公開する使い方は想定していません。外から使いたいときは Tailscale などの VPN 越しにしてください。
 
-### Docker で動かす
-
-Python や Claude Code をホストに入れたくない場合は Docker でも動きます（B の方式）。このフォルダをそのままマウントするので、学習データはホスト側に残ります。
-
-```bash
-cp .env.example .env    # CLAUDE_CODE_OAUTH_TOKEN か ANTHROPIC_API_KEY を書く
-docker compose up -d    # → http://127.0.0.1:8765/
-```
-
-- コンテナは uid 1000 のユーザーで動きます。ホストのユーザーが uid 1000 でない場合は、`compose.yaml` に `user: "<uid>:<gid>"` と、環境変数 `HOME: /tmp/home`（`claude-home` ボリュームは uid 1000 の持ち物で書き込めないため）を足してください。認証は `.env` のトークンで行うので、Claude Code の設定が残らなくても動きます
-- 別の端末から使うときは `compose.yaml` の `ports` を `"8765:8765"` にし、`command` から `--allow-no-token` を外して、`.env` に `LEARN_TOKEN` を設定します。トークンなしのサーバーも `localhost` 以外の名前で開いたリクエストは断りますが、これはブラウザ経由の攻撃（DNS rebinding）への対策です。Host ヘッダは偽装できるので、ポートを外に開くときはトークンが必須です
-
 ## コマンド
 
 | コマンド | やること |
@@ -194,7 +182,6 @@ docker compose up -d    # → http://127.0.0.1:8765/
 ├ scripts/analyze.py      # 得意・不得意の分析（記述式と択一を合わせて）
 ├ webui/                  # ブラウザから使うためのローカルサーバーと画面（python3 webui/server.py）
 ├ inbox/                  # 画面から Claude Code への依頼（/inbox で処理。git管理外）
-├ Dockerfile compose.yaml # Docker で動かすとき
 ├ tests/                  # スクリプトのテスト（python3 -m unittest discover -s tests）
 ├ questions/ rubrics/ answers/ results/
 ├ questions/assets/       # 問題の図（画像・SVG）
