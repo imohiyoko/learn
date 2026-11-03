@@ -117,6 +117,14 @@
         <div id="set-reason" class="muted small"></div>
         <div id="set-body" class="md"></div>
         <div id="set-options" class="options"></div>
+        <div id="set-conf" class="conf" hidden>
+          <span class="muted small">どれくらいわかって選びましたか？</span>
+          <div class="row" role="group" aria-label="確信度">
+            <button type="button" data-conf="sure">根拠がわかる</button>
+            <button type="button" data-conf="narrowed">消去法</button>
+            <button type="button" data-conf="guess">勘</button>
+          </div>
+        </div>
         <div id="set-short" hidden>
           <textarea id="set-short-text" rows="3" aria-label="解答"></textarea>
           <div id="set-short-count" class="ans-count"></div>

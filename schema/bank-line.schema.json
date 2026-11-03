@@ -71,6 +71,15 @@
       "type": "string",
       "description": "択一で選んだ記号（サーバーが書く）"
     },
+    "confidence": {
+      "type": "string",
+      "enum": [
+        "sure",
+        "narrowed",
+        "guess"
+      ],
+      "description": "択一で答えたときの自己申告（sure=根拠がわかる／narrowed=消去法／guess=勘）。web UI のサーバーが書く。ない行は不明として扱い、あとから書き足さない"
+    },
     "graded_at": {
       "type": "string",
       "format": "date-time",

@@ -113,5 +113,32 @@ class RouteTest(unittest.TestCase):
         self.assertGreater(c[0]["after"], 0.5)
 
 
+class ConfidenceTest(unittest.TestCase):
+    """択一の確信度で、1問が見込みを動かす強さが変わる。"""
+
+    def model_after(self, score, confidence):
+        r = {"kind": "choice", "score": score, "max": 1, "difficulty": 2, "concepts": ["web/xss"], "_t": NOW}
+        if confidence:
+            r["confidence"] = confidence
+        return route.build_model({"web/xss": {}}, [r])["web/xss"]["theta"]
+
+    def test_right_answers_weaken_with_doubt(self):
+        sure, narrowed, guess, unknown = (self.model_after(1, c) for c in ("sure", "narrowed", "guess", None))
+        self.assertEqual(sure, unknown)
+        self.assertGreater(sure, narrowed)
+        self.assertGreater(narrowed, guess)
+        self.assertGreater(guess, 0.0)
+
+    def test_odd_value_is_unknown(self):
+        self.assertEqual(self.model_after(1, ["sure"]), self.model_after(1, None))
+
+    def test_confident_miss_hurts_most(self):
+        sure, narrowed, guess, unknown = (self.model_after(0, c) for c in ("sure", "narrowed", "guess", None))
+        self.assertEqual(narrowed, unknown)
+        self.assertLess(sure, narrowed)
+        self.assertLess(narrowed, guess)
+        self.assertLess(guess, 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

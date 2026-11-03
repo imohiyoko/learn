@@ -172,7 +172,10 @@ def set_view(s):
     return out
 
 
-def answer_set_item(sid, iid, value):
+CONFIDENCES = ("sure", "narrowed", "guess")
+
+
+def answer_set_item(sid, iid, value, confidence=None):
     with SET_LOCK:
         s = load_set(sid)
         if not s:
@@ -191,15 +194,22 @@ def answer_set_item(sid, iid, value):
                 raise LookupError("正解キーがありません")
             if value not in {o["label"] for o in b["options"]}:
                 raise ValueError("選択肢から選んでください")
+            if confidence not in (None, *CONFIDENCES):
+                raise ValueError("確信度が正しくありません")
             correct = value == k["meta"].get("answer", "").strip()
             names = concept_names()
-            append_jsonl(files.LOGS["bank"][0], {
+            line = {
                 "id": f"{sid}-{iid}", "set": sid, "item": iid, "kind": "choice", "tags": it["tags"] or ["unknown"],
                 "concepts": it["concepts"], "difficulty": it["difficulty"], "score": 1 if correct else 0, "max": 1,
                 "answer": value, "graded_at": now_iso(),
-                "weak": [] if correct else [names.get(c, c) for c in it["concepts"][:1]], "miss_type": {}})
+                "weak": [] if correct else [names.get(c, c) for c in it["concepts"][:1]], "miss_type": {}}
+            if confidence:
+                line["confidence"] = confidence
+            append_jsonl(files.LOGS["bank"][0], line)
             s["answers"][iid] = value
             s["results"][iid] = {"correct": correct, "graded_at": now_iso()}
+            if confidence:
+                s["results"][iid]["confidence"] = confidence
         else:
             if len(value) > 4000:
                 raise ValueError("解答が長すぎます")

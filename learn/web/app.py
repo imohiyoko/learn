@@ -243,7 +243,8 @@ class Handler(BaseHTTPRequestHandler):
                                                                   str(body.get("kind") or "mixed")))})
             m = re.match(r"^/api/sets/([^/]+)/answer$", path)
             if m:
-                s = answer_set_item(m.group(1), str(body.get("item") or ""), body.get("value"))
+                s = answer_set_item(m.group(1), str(body.get("item") or ""), body.get("value"),
+                                    body.get("confidence"))
                 return self.send_json({"set": set_view(s)})
             m = re.match(r"^/api/sets/([^/]+)/ask$", path)
             if m:
