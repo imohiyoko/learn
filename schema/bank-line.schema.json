@@ -78,7 +78,14 @@
         "narrowed",
         "guess"
       ],
-      "description": "択一で答えたときの自己申告（sure=根拠がわかる／narrowed=消去法／guess=勘）。web UI のサーバーが書く。ない行は不明として扱い、あとから書き足さない"
+      "description": "択一の確信度。web UI のサーバーが unsure から決めて書く（選んだ答えに印＝guess、ほかの選択肢だけに印＝narrowed）。sure は以前の画面で書いた行だけ。ない行は不明として扱い、あとから書き足さない"
+    },
+    "unsure": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "択一で「不安」の印を付けた選択肢の記号（web UI のサーバーが書く）。印がなければ項目ごと書かない"
     },
     "graded_at": {
       "type": "string",

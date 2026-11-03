@@ -172,10 +172,15 @@ def set_view(s):
     return out
 
 
-CONFIDENCES = ("sure", "narrowed", "guess")
+def confidence_of(value, unsure):
+    """選択肢ごとの「不安」の印から確信度を決める。選んだ答えに印があれば勘、ほかの選択肢だけなら消去法。
+    印がなければ None（付け忘れもあるので「根拠がわかる」とは決めつけない）"""
+    if not unsure:
+        return None
+    return "guess" if value in unsure else "narrowed"
 
 
-def answer_set_item(sid, iid, value, confidence=None):
+def answer_set_item(sid, iid, value, unsure=None):
     with SET_LOCK:
         s = load_set(sid)
         if not s:
@@ -194,8 +199,13 @@ def answer_set_item(sid, iid, value, confidence=None):
                 raise LookupError("正解キーがありません")
             if value not in {o["label"] for o in b["options"]}:
                 raise ValueError("選択肢から選んでください")
-            if confidence not in (None, *CONFIDENCES):
-                raise ValueError("確信度が正しくありません")
+            labels = {o["label"] for o in b["options"]}
+            if unsure is None:
+                unsure = []
+            if not isinstance(unsure, list) or not all(isinstance(x, str) and x in labels for x in unsure):
+                raise ValueError("不安の印は選択肢の記号で指定してください")
+            unsure = sorted(set(unsure))
+            confidence = confidence_of(value, unsure)
             correct = value == k["meta"].get("answer", "").strip()
             names = concept_names()
             line = {
@@ -203,13 +213,14 @@ def answer_set_item(sid, iid, value, confidence=None):
                 "concepts": it["concepts"], "difficulty": it["difficulty"], "score": 1 if correct else 0, "max": 1,
                 "answer": value, "graded_at": now_iso(),
                 "weak": [] if correct else [names.get(c, c) for c in it["concepts"][:1]], "miss_type": {}}
-            if confidence:
+            if unsure:
+                line["unsure"] = unsure
                 line["confidence"] = confidence
             append_jsonl(files.LOGS["bank"][0], line)
             s["answers"][iid] = value
             s["results"][iid] = {"correct": correct, "graded_at": now_iso()}
-            if confidence:
-                s["results"][iid]["confidence"] = confidence
+            if unsure:
+                s["results"][iid].update({"unsure": unsure, "confidence": confidence})
         else:
             if len(value) > 4000:
                 raise ValueError("解答が長すぎます")
