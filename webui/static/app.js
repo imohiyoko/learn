@@ -130,6 +130,7 @@
   async function start(body) {
     try {
       const r = await api("/api/run", { method: "POST", body });
+      $("#set-card").hidden = true; // 別の学習を始めたら、セットはしまう（ホームの「続きから」で戻れる）
       openJob(r.job);
       showTab("study");
       window.scrollTo({ top: 0 });
@@ -155,7 +156,9 @@
       $("#home-glossary").hidden = !todo;
       $("#home-glossary").innerHTML = `単語帳：まだ覚えていない言葉が ${todo}語あります。<a href="#" data-go="glossary">単語帳を開く</a>`;
     }).catch(() => {});
+    $("#home-set").hidden = !ok;
     if (!ok) { $("#home-summary").textContent = "下の「資格を選ぶ」から始めてください"; $("#home-continue").innerHTML = ""; return; }
+    loadHomeSet(gen).catch((e) => { $("#home-set-text").textContent = e.message; });
 
     const [{ analysis: a }, { items }, { jobs }] = await Promise.all([api("/api/analysis"), api("/api/items"), api("/api/jobs")]);
     if (gen !== homeGen) return;
@@ -178,6 +181,31 @@
       </div>`).join("");
   }
 
+  async function loadHomeSet(gen) {
+    const [b, { sets }] = await Promise.all([api("/api/bank"), api("/api/sets")]);
+    if (gen !== homeGen) return;
+    const model = Object.values(b.model || {});
+    const measured = model.filter((c) => !["未出題", "測定中"].includes(c.status)).length;
+    const weak = model.filter((c) => c.status === "苦手").sort((x, y) => x.p - y.p).slice(0, 3);
+    $("#home-set-meta").textContent = b.ready ? `論点 ${b.concepts}・問題 ${b.items}問（択一 ${(b.kinds || {}).choice || 0}・記述 ${(b.kinds || {}).short || 0}・長文 ${(b.kinds || {}).long || 0}）` : "";
+    $("#home-set-text").innerHTML = !b.ready
+      ? (b.concepts ? "問題バンクの問題がまだ確認中です。もう少し待つか、作り足してください。" : "問題バンクがまだありません。分野ごとに論点を分け、問題を前もって作っておくと、苦手を機械的に洗い出して埋めるセットが出せます。")
+      : (measured < model.length * 0.7
+        ? `いまは<b>洗い出し</b>の段階です（測れた論点 ${measured} / ${model.length}）。まだ測れていない論点から出します。`
+        : `いまは<b>穴埋め</b>の段階です。苦手な論点を中心に、間違えた問題のやり直しも混ぜて出します。`) +
+        (weak.length ? `<br>苦手：${weak.map((c) => `${esc(c.name)}（${pct(c.p)}）`).join("、")}` : "") +
+        (b.need ? `<br><span class="muted">足りない問題が ${b.need}問あります。</span>` : "");
+    $("#home-set-start").hidden = !b.ready;
+    $("#home-long").hidden = !b.ready;
+    $("#home-prepare").hidden = b.ready && !b.need;
+    $("#home-prepare").textContent = b.ready ? `問題を作り足す（${b.need}問）` : "問題バンクを作る";
+    const open = sets.filter((s) => s.status === "open").slice(0, 3);
+    $("#home-set-open").innerHTML = open.length
+      ? `<div class="row">${open.map((s) => `<button data-set="${esc(s.id)}">続きから：${esc(s.id)}（${s.answered} / ${s.n}）</button>`).join("")}</div>` : "";
+  }
+  $("#home-set-start").addEventListener("click", () => newSet());
+  $("#home-prepare").addEventListener("click", () => start({ action: "prepare" }));
+
   function renderExamples() {
     $("#home-examples").innerHTML = S.examples.map((e) => {
       const cur = S.profile === "ok" && S.exam === e.name;
@@ -187,9 +215,10 @@
   }
 
   document.addEventListener("click", async (e) => {
-    const b = e.target.closest("[data-start], [data-example], [data-job]");
+    const b = e.target.closest("[data-start], [data-example], [data-job], [data-set]");
     if (!b) return;
     e.preventDefault();
+    if (b.dataset.set) return openSet(b.dataset.set);
     if (b.dataset.start) return start({ action: b.dataset.start, tag: b.dataset.tag || "" });
     if (b.dataset.example) return useExample(b.dataset.example);
     if (b.dataset.job) {
@@ -197,6 +226,7 @@
         const { jobs } = await api("/api/jobs");
         const j = jobs.find((x) => x.id === b.dataset.job);
         if (!j) return notice("この会話はもうありません", "warn");
+        $("#set-card").hidden = true;
         openJob(j);
         showTab("study");
       } catch (err) { notice(esc(err.message), "error"); }
@@ -379,7 +409,8 @@
         if (ended) {
           loadState().catch((e) => notice("成績の表示を更新できませんでした（" + esc(e.message) + "）", "error"));
           const t = job.target || (q && q.startsWith("drill-") ? q : null);
-          if (t) await showResult(t, id);
+          if (t && t.startsWith("set-")) await openSet(t, true);
+          else if (t) await showResult(t, id);
         }
         return;
       }
@@ -416,6 +447,7 @@
     $("#question-body").innerHTML = r.html;
     const isDrill = id.startsWith("drill-");
     $("#answer-box").hidden = isDrill;
+    if (isDrill) renderDrill(id, q.text);
     if (isDrill) timerSet(null);
     else timerSet(id, parseFloat(r.meta.time_limit_min) || null);
     if (!isDrill && fresh) {
@@ -437,6 +469,248 @@
       }
     }
   }
+
+  // ---------------------------------------------------------- 択一ドリル（/drill）をクリックで1問ずつ
+  // 答えはまとめて「1ア 2ウ …」の形で会話に返す（答え合わせは /drill スキル）
+  const CHOICE_RE = /^\s*[-*]\s*([ア-ンA-Z])[\s　.．:：)）]\s*(.+)$/;
+  let drill = { id: null, qs: [], at: 0, picks: {}, sent: false };
+  function parseDrill(text) {
+    const body = text.replace(/^---\n[\s\S]*?\n---\n?/, "");
+    const parts = body.split(/^(?=\*\*問\s*\d+\*\*)/m);
+    const intro = /^\*\*問/.test(parts[0]) ? "" : parts.shift();
+    const qs = parts.map((p) => {
+      const n = +p.match(/^\*\*問\s*(\d+)/)[1];
+      const options = [], rest = [];
+      p.split("\n").forEach((l) => { const m = l.match(CHOICE_RE); if (m) options.push({ label: m[1], text: m[2] }); else rest.push(l); });
+      return { n, body: rest.join("\n").trim(), options };
+    }).filter((x) => x.options.length);
+    return { intro, qs };
+  }
+  function renderDrill(id, text) {
+    const { intro, qs } = parseDrill(text);
+    if (!qs.length) return; // 読み取れない形なら、ふつうに表示して返信欄で答える
+    if (drill.id !== id) drill = { id, qs, at: 0, picks: {}, sent: false, intro };
+    else Object.assign(drill, { qs, intro });
+    drawDrill();
+  }
+  function drawDrill() {
+    const d = drill, q = d.qs[d.at];
+    const done = Object.keys(d.picks).length;
+    $("#question-body").innerHTML = `${md.render(d.intro || "").html}
+      <div class="set-dots">${d.qs.map((x, i) => `<button type="button" data-dq="${i}" class="${i === d.at ? "cur " : ""}${d.picks[x.n] ? "done" : ""}">${x.n}</button>`).join("")}</div>
+      <div class="md">${md.render(q.body).html}</div>
+      <div class="options">${q.options.map((o) => `<button type="button" data-dopt="${esc(o.label)}" class="${d.picks[q.n] === o.label ? "sel" : ""}"${d.sent ? " disabled" : ""}><span class="lbl">${esc(o.label)}</span><span>${md.render(o.text).html.replace(/^<p>|<\/p>$/g, "")}</span></button>`).join("")}</div>
+      <div class="row">
+        <button type="button" data-dmove="-1"${d.at === 0 ? " disabled" : ""}>前へ</button>
+        <button type="button" data-dmove="1"${d.at === d.qs.length - 1 ? " disabled" : ""}>次へ</button>
+        <button type="button" class="primary" id="drill-send"${d.sent || !done ? " disabled" : ""}>答えを送る（${done} / ${d.qs.length}）</button>
+        <span class="muted small">${d.sent ? "送りました。答え合わせを待っています" : "わからない問題は選ばずに送ると「?」になります"}</span>
+      </div>`;
+  }
+  $("#question-body").addEventListener("click", async (e) => {
+    if (!drill.id || currentQ !== drill.id) return;
+    const d = drill, q = d.qs[d.at];
+    const o = e.target.closest("[data-dopt]"), mv = e.target.closest("[data-dmove]"), dq = e.target.closest("[data-dq]");
+    if (o && !d.sent) {
+      d.picks[q.n] = o.dataset.dopt;
+      if (d.at < d.qs.length - 1) setTimeout(() => { d.at++; drawDrill(); }, 250); // 選んだら次の問題へ
+      drawDrill();
+    } else if (mv) { d.at = Math.min(Math.max(d.at + +mv.dataset.dmove, 0), d.qs.length - 1); drawDrill(); }
+    else if (dq) { d.at = +dq.dataset.dq; drawDrill(); }
+    else if (e.target.id === "drill-send") {
+      const left = d.qs.filter((x) => !d.picks[x.n]).length;
+      if (left && !confirm(`まだ選んでいない問題が ${left}問あります（「?」として送ります）。送りますか？`)) return;
+      const text = d.qs.map((x) => `${x.n}${d.picks[x.n] || "?"}`).join(" ");
+      try {
+        const r = await api(`/api/jobs/${job.id}/reply`, { method: "POST", body: { text } });
+        d.sent = true;
+        job = r.job;
+        setStatus(job);
+        drawDrill();
+        poll();
+      } catch (err) { notice(esc(err.message), "error"); }
+    }
+  });
+
+  // ---------------------------------------------------------- セット（問題バンク）
+  // scripts/route.py が選んだ問題を1問ずつ。択一は答えたその場でサーバーが採点して解説を出す。
+  // 記述は書いて保存し、最後に提出すると /grade-set が採点とレポートを作る
+  let SET = null, setAt = 0, setPick = null, setGen = 0;
+  const SLOT_HELP = { "洗い出し": "まだ測れていない論点", "穴埋め": "苦手な論点", "やり直し": "前に間違えた問題", "確認": "得意な論点の確認" };
+
+  async function newSet() {
+    try {
+      const { set } = await api("/api/sets", { method: "POST", body: { n: 10 } });
+      showSet(set);
+      showTab("study");
+      window.scrollTo({ top: 0 });
+    } catch (e) { notice(esc(e.message), "error"); }
+  }
+
+  async function openSet(id, keepTab) {
+    const gen = ++setGen;
+    try {
+      const { set } = await api(`/api/sets/${encodeURIComponent(id)}`);
+      if (gen !== setGen) return;
+      showSet(set);
+      if (!keepTab) { showTab("study"); window.scrollTo({ top: 0 }); }
+    } catch (e) { notice(esc(e.message), "error"); }
+  }
+
+  function showSet(s, at) {
+    const same = SET && SET.id === s.id;
+    SET = s;
+    try { localStorage.setItem("learn.set", s.id); } catch (e) {}
+    $("#set-card").hidden = false;
+    $("#set-title").textContent = "セット " + s.id.replace(/^set-/, "");
+    const label = { open: "解いている途中", submitted: "採点中", graded: "採点済み" }[s.status];
+    $("#set-meta").textContent = `${s.phase}・${s.items.length}問・${label}`;
+    const first = s.items.findIndex((it) => it.answer == null);
+    setAt = at ?? (same ? setAt : first < 0 ? s.items.length : first);
+    if (s.status === "open") timerSet(s.id, s.items.reduce((m, it) => m + (parseFloat(it.time_min) || (it.kind === "choice" ? 1 : 8)), 0));
+    else if (tm.id === s.id) timerSet(null);
+    drawSet();
+  }
+
+  function drawSet() {
+    const s = SET;
+    const graded = s.status === "graded";
+    $("#set-dots").innerHTML = s.items.map((it, i) => {
+      const r = it.result;
+      const cls = r ? (r.correct ? "ok" : "ng") : it.answer != null ? "done" : "";
+      return `<button type="button" data-si="${i}" class="${cls}${i === setAt ? " cur" : ""}" title="${esc(it.concept_names.join("、"))}">${i + 1}</button>`;
+    }).join("") + (s.status === "open" ? `<button type="button" data-si="${s.items.length}" class="${setAt >= s.items.length ? "cur" : ""}" title="提出">✓</button>` : "");
+    $("#set-report").hidden = !graded;
+    $("#set-item").hidden = graded || setAt >= s.items.length;
+    $("#set-finish").hidden = graded || setAt < s.items.length;
+    if (graded) return drawReport();
+    if (setAt >= s.items.length) return drawFinish();
+    const it = s.items[setAt];
+    setPick = null;
+    $("#set-reason").textContent = `${setAt + 1} / ${s.items.length}・${it.kind === "choice" ? "択一" : "記述"}・${it.slot}（${SLOT_HELP[it.slot] || ""}）・${it.reason}`;
+    $("#set-body").innerHTML = md.render(it.body).html;
+    const answered = it.kind === "choice" && !!it.result;
+    const right = it.key && it.key.answer;
+    $("#set-options").hidden = it.kind !== "choice";
+    $("#set-short").hidden = it.kind !== "short";
+    if (it.kind === "choice") {
+      $("#set-options").innerHTML = it.options.map((o) => {
+        const cls = answered ? (o.label === right ? "right" : o.label === it.answer ? "wrong" : "") : "";
+        return `<button type="button" data-opt="${esc(o.label)}" class="${cls}"${answered || s.status !== "open" ? " disabled" : ""}><span class="lbl">${esc(o.label)}</span><span>${md.render(o.text).html.replace(/^<p>|<\/p>$/g, "")}</span></button>`;
+      }).join("");
+    } else {
+      $("#set-short-text").value = it.answer || "";
+      $("#set-short-text").disabled = s.status !== "open";
+      shortCount();
+    }
+    const fb = $("#set-feedback");
+    fb.hidden = !answered;
+    if (answered) {
+      fb.className = "feedback md " + (it.result.correct ? "ok" : "ng");
+      fb.innerHTML = `<p><b>${it.result.correct ? "正解" : "不正解"}</b>（あなたの答え：${esc(it.answer)}・正解：${esc(right || "")}）</p>` + md.render(it.key ? it.key.body : "").html;
+    }
+    $("#set-answer").hidden = s.status !== "open" || answered;
+    $("#set-answer").textContent = it.kind === "choice" ? "答える" : "保存して次へ";
+    $("#set-answer").disabled = it.kind === "choice";
+    $("#set-prev").disabled = setAt === 0;
+    $("#set-next").textContent = setAt === s.items.length - 1 ? (s.status === "open" ? "提出へ" : "次へ") : "次へ";
+    $("#set-status").textContent = it.kind === "short" ? "記述は提出後にまとめて採点します" : "";
+  }
+
+  function shortCount() {
+    const it = SET && SET.items[setAt];
+    if (!it || it.kind !== "short") return;
+    const m = (it.body || "").match(/(\d+)\s*字以内/);
+    const lim = m ? +m[1] : null;
+    const n = answer.count($("#set-short-text").value);
+    const c = $("#set-short-count");
+    c.textContent = lim ? (n > lim ? `${n} / ${lim}字（${n - lim}字オーバー）` : `${n} / ${lim}字`) : `${n}字`;
+    c.className = "ans-count" + (lim && n > lim ? " over" : lim && n >= lim * 0.9 ? " near" : "");
+  }
+  $("#set-short-text").addEventListener("input", () => { shortCount(); timerAutoStart(); });
+
+  $("#set-options").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-opt]");
+    if (!b || b.disabled) return;
+    setPick = b.dataset.opt;
+    $$("#set-options button").forEach((x) => x.classList.toggle("sel", x === b));
+    $("#set-answer").disabled = false;
+    timerAutoStart();
+  });
+  $("#set-options").addEventListener("dblclick", (e) => { if (e.target.closest("[data-opt]") && setPick) setAnswer(); });
+
+  async function setAnswer() {
+    const it = SET.items[setAt];
+    const value = it.kind === "choice" ? setPick : $("#set-short-text").value;
+    if (it.kind === "choice" && !value) return;
+    $("#set-answer").disabled = true;
+    try {
+      const { set } = await api(`/api/sets/${SET.id}/answer`, { method: "POST", body: { item: it.id, value } });
+      SET = set;
+      if (it.kind === "short") setAt++;
+      drawSet();
+    } catch (e) { notice(esc(e.message), "error"); $("#set-answer").disabled = false; }
+  }
+  $("#set-answer").addEventListener("click", setAnswer);
+
+  async function setMove(d) {
+    const it = SET.items[setAt];
+    // 書きかけの記述は、移るときに保存しておく
+    if (it && it.kind === "short" && SET.status === "open" && $("#set-short-text").value !== (it.answer || "")) {
+      try { SET = (await api(`/api/sets/${SET.id}/answer`, { method: "POST", body: { item: it.id, value: $("#set-short-text").value } })).set; }
+      catch (e) { return notice(esc(e.message), "error"); }
+    }
+    setAt = Math.min(Math.max(setAt + d, 0), SET.items.length);
+    drawSet();
+  }
+  $("#set-prev").addEventListener("click", () => setMove(-1));
+  $("#set-next").addEventListener("click", () => setMove(1));
+  $("#set-back").addEventListener("click", () => { setAt = 0; drawSet(); });
+  $("#set-dots").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-si]");
+    if (b) setMove(+b.dataset.si - setAt);
+  });
+
+  function drawFinish() {
+    const s = SET;
+    const left = s.items.filter((it) => it.answer == null).length;
+    const ch = s.items.filter((it) => it.kind === "choice" && it.result);
+    const ok = ch.filter((it) => it.result.correct).length;
+    $("#set-finish-text").innerHTML = s.status === "submitted"
+      ? "提出しました。Claude が記述を採点し、解説と分析のレポートを書いています。下の会話欄に進み具合が出ます。"
+      : `択一 ${ok} / ${ch.length}問 正解。` + (left ? `<b>まだ答えていない問題が ${left}問</b>あります（答えていない択一は記録しません。記述は0点になります）。` : "全部答えました。") +
+        "提出すると、記述を採点し、問題ごとの解説と論点ごとの分析をレポートに保存します。";
+    $("#set-submit").hidden = $("#set-back").hidden = s.status !== "open";
+  }
+  $("#set-submit").addEventListener("click", async () => {
+    const left = SET.items.filter((it) => it.answer == null).length;
+    if (!confirm(left ? `まだ答えていない問題が ${left}問あります。提出しますか？` : "提出して、採点とレポートを作りますか？")) return;
+    try {
+      const r = await api(`/api/sets/${SET.id}/submit`, { method: "POST", body: {} });
+      if (tm.id === SET.id) timerPause(SET.id);
+      showSet(r.set);
+      openJob(r.job);
+    } catch (e) { notice(esc(e.message), "error"); }
+  });
+
+  function drawReport() {
+    const s = SET;
+    const wrongOnly = $("#set-wrong-only").checked;
+    $("#set-compare").innerHTML = (s.compare || []).length ? `<div class="table"><table><thead><tr><th>論点</th><th>前</th><th>後</th><th>判定</th></tr></thead><tbody>${
+      s.compare.map((c) => `<tr><td>${esc(c.name)}</td><td>${pct(c.before)}</td><td>${pct(c.after)}</td><td class="small">${esc(c.status_before || "")} → ${esc(c.status_after)}</td></tr>`).join("")}</tbody></table></div>` : "";
+    $("#set-report-body").innerHTML = md.render(s.report || "").html;
+    $("#set-review").innerHTML = s.items.map((it, i) => ({ it, i })).filter(({ it }) => !wrongOnly || !(it.result && it.result.correct)).map(({ it, i }) => {
+      const r = it.result;
+      const mark = !r ? "—" : it.kind === "choice" ? (r.correct ? "○" : "×") : `${r.score} / ${r.max}`;
+      return `<details class="review-item"><summary><b>${i + 1}.</b> ${mark}　${esc(it.concept_names.join("、"))} <span class="muted small">${it.kind === "choice" ? "択一" : "記述"}・${esc(it.slot)}</span></summary>
+        <div class="md">${md.render(it.body).html}</div>
+        ${it.options.length ? `<ul>${it.options.map((o) => `<li>${esc(o.label)} ${esc(o.text)}</li>`).join("")}</ul>` : ""}
+        <p><b>あなたの答え：</b>${esc(it.answer == null ? "（無解答）" : it.answer)}</p>
+        ${it.key ? `<div class="feedback md">${it.key.answer ? `<p><b>正解：${esc(it.key.answer)}</b></p>` : ""}${md.render(it.key.body).html}</div>` : ""}
+      </details>`;
+    }).join("") || `<p class="muted">間違えた問題はありません。</p>`;
+  }
+  $("#set-wrong-only").addEventListener("change", () => SET && drawReport());
 
   // 採点が終わったら講評を表示する
   async function showResult(id, jid) {
@@ -590,7 +864,7 @@
 
   function timerRender() {
     const el = $("#timer");
-    const visible = !!tm.id && !$("#tab-study").hidden && !$("#question-card").hidden;
+    const visible = !!tm.id && !$("#tab-study").hidden && (!$("#question-card").hidden || (!!SET && tm.id === SET.id && !$("#set-card").hidden));
     el.hidden = !visible;
     if (!visible) return;
     const t = tLoad(tm.id);
@@ -678,7 +952,18 @@
   const pct = (x) => (x == null ? "—" : Math.round(x * 100) + "%");
   const MISS = { knowledge: "知識", reading: "読解", writing: "記述" };
 
+  async function loadConcepts() {
+    const b = await api("/api/bank");
+    const rows = Object.values(b.model || {});
+    if (!rows.length) { $("#concepts-body").innerHTML = `<p class="muted">論点の一覧（exam/concepts.md）がまだありません。ホームの「問題バンクを作る」から作れます。</p>`; return; }
+    rows.sort((x, y) => (STATUS_ORDER[x.status] ?? 2) - (STATUS_ORDER[y.status] ?? 2) || x.p - y.p);
+    $("#concepts-body").innerHTML = `<div class="table"><table><thead><tr><th>論点</th><th>判定</th><th>見込み</th><th>解いた数</th></tr></thead><tbody>${
+      rows.map((c) => `<tr class="st-${esc(c.status)}"><td>${esc(c.name)}<div class="muted small">${esc(c.concept)}</div></td><td><span class="badge">${esc(c.status)}</span></td>
+        <td>${c.n ? `${pct(c.p)} <span class="muted small">(${pct(c.low)}〜${pct(c.high)})</span>` : "—"}</td><td>${c.n}</td></tr>`).join("")}</tbody></table></div>`;
+  }
+
   async function loadStats() {
+    loadConcepts().catch((e) => { $("#concepts-body").textContent = e.message; });
     const box = $("#stats-body");
     try {
       const { analysis: a } = await api("/api/analysis");
@@ -814,7 +1099,16 @@
   $("#flash-close").addEventListener("click", () => { $("#flash").hidden = true; loadGlossary().catch(() => {}); });
 
   // ---------------------------------------------------------- 履歴
+  async function loadSets() {
+    const { sets } = await api("/api/sets");
+    const st = { open: "解いている途中", submitted: "採点中", graded: "レポートあり" };
+    $("#sets-list").innerHTML = sets.length ? sets.map((s) => `<tr data-set="${esc(s.id)}"><td><a href="#">${esc(s.id)}</a></td>
+      <td>${esc(s.phase || "")}</td><td>択一 ${s.correct} / ${s.choices}</td><td>${st[s.status] || s.status}</td></tr>`).join("")
+      : `<tr><td colspan="4" class="muted">まだセットを解いていません</td></tr>`;
+  }
+
   async function loadItems() {
+    loadSets().catch(() => {});
     const { items } = await api("/api/items");
     $("#items").innerHTML = items.length ? items.map((x) => `<tr data-id="${esc(x.id)}">
       <td><a href="#">${esc(x.id)}</a></td><td>${x.kind === "drill" ? "択一" : "記述"}</td><td>${esc(x.tags)}</td>

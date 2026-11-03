@@ -73,14 +73,18 @@ def parse_pass_ratio(path=stats.PROFILE):
     return DEFAULT_PASS
 
 
-def load_rows(history_path=None, drill_path=None):
-    """両方のログを読み、kind（written / drill）を付けて時刻順に並べる。"""
+def load_rows(history_path=None, drill_path=None, bank_path=None):
+    """記述式・択一・問題バンクのログを読み、kind（written / drill）を付けて時刻順に並べる。
+    バンクの択一は drill、短い記述は written として数える。"""
     history_path = history_path or stats.LOGS["history"][0]
     drill_path = drill_path or stats.LOGS["drill"][0]
+    bank_path = bank_path or Path(history_path).parent / "bank.jsonl"  # 記述式のログと同じフォルダ
     rows = []
     for kind, path in (("written", history_path), ("drill", drill_path)):
         for r in stats.load_history(path):
             rows.append(dict(r, _kind=kind))
+    for r in stats.load_history(bank_path) if Path(bank_path).exists() else []:
+        rows.append(dict(r, _kind="drill" if r.get("kind") == "choice" else "written"))
     rows.sort(key=sort_key)
     return rows
 

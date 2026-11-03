@@ -17,6 +17,11 @@ results/*
 log/*
 !log/.gitkeep
 
+# 問題バンク（正解キーを含む）・セット・レポート
+/bank/
+/sets/
+/reports/
+
 # 公式過去問・参考書PDFなどの資料
 refs/*
 !refs/README.md

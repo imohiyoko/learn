@@ -33,6 +33,7 @@ description: 学習者の解答を採点し、講評・成績記録・次の出�
 4. **成績を記録**
    - `templates/history-line.json` の形式で `log/history.jsonl` に1行（改行を含まないJSON）追記する。各項目の出どころ：
      - `id`・`source`・`tags`：`questions/<id>.md` の front matter から。`tags` は順番を変えない（先頭が主タグ）
+     - 問題バンクから出した長文（front matter に `concepts` がある）なら、`concepts`・`difficulty` もそのまま入れ、`kind: "long"` を足す（`scripts/route.py` が論点ごとの見込みに使う）
      - `score`・`max`：grader の合計点と満点（数値で）
      - `minutes`：手順1で出した所要時間（数値、分）
      - `graded_at`：現在時刻（ISO8601）

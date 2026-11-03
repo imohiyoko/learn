@@ -398,5 +398,72 @@ class WebUITest(unittest.TestCase):
             server.build_prompt({"action": "glossary", "terms": "/review"})
 
 
+    def test_11_bank_sets(self):
+        sys.path.insert(0, str(ROOT / "tests"))
+        import test_route
+        for d in ("bank", "sets", "reports"):
+            shutil.rmtree(self.tmp / d, ignore_errors=True)
+        (self.tmp / "log" / "bank.jsonl").unlink(missing_ok=True)
+        # 論点と問題バンク（profile はテスト用のものを保つ）
+        tmp2 = Path(tempfile.mkdtemp())
+        try:
+            test_route.make_bank(tmp2, tags=("web",), per=2)
+            shutil.copytree(tmp2 / "bank", self.tmp / "bank")
+            shutil.copy(tmp2 / "exam" / "concepts.md", self.tmp / "exam" / "concepts.md")
+        finally:
+            shutil.rmtree(tmp2)
+        for f in (self.tmp / "bank" / "items").glob("*-q*.md"):
+            f.write_text(f.read_text(encoding="utf-8") + "\n\n- ア 正しい\n- イ 違う\n- ウ 違う\n- エ 違う\n", encoding="utf-8")
+
+        _, b = self.call("/api/bank")
+        self.assertEqual((b["ready"], b["concepts"], b["items"]), (True, 2, 8))
+        code, r = self.call("/api/sets", "POST", {"n": 2})
+        self.assertEqual(code, 200, r)
+        s = r["set"]
+        self.assertEqual(len(s["items"]), 2)
+        ch = next(it for it in s["items"] if it["kind"] == "choice")
+        self.assertEqual([o["label"] for o in ch["options"]], ["ア", "イ", "ウ", "エ"])
+        self.assertNotIn("- ア", ch["body"])
+        self.assertNotIn("key", ch, "答える前に正解を出さない")
+        # 選択肢にない答え・答え直しは断る
+        code, _ = self.call(f"/api/sets/{s['id']}/answer", "POST", {"item": ch["id"], "value": "オ"})
+        self.assertEqual(code, 400)
+        code, r = self.call(f"/api/sets/{s['id']}/answer", "POST", {"item": ch["id"], "value": "イ"})
+        self.assertEqual(code, 200, r)
+        it = next(x for x in r["set"]["items"] if x["id"] == ch["id"])
+        self.assertEqual((it["result"]["correct"], it["key"]["answer"]), (False, "ア"))
+        code, _ = self.call(f"/api/sets/{s['id']}/answer", "POST", {"item": ch["id"], "value": "ア"})
+        self.assertEqual(code, 409)
+        rows = [json.loads(x) for x in (self.tmp / "log" / "bank.jsonl").read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([(x["item"], x["score"], x["concepts"]) for x in rows], [(ch["id"], 0, ch["concepts"])])
+        # 記述の正解（採点基準）は採点が終わるまで出さない
+        short = [x for x in s["items"] if x["kind"] == "short"]
+        if short:
+            code, r = self.call(f"/api/sets/{s['id']}/answer", "POST", {"item": short[0]["id"], "value": "解答"})
+            self.assertEqual(code, 200)
+            self.assertNotIn("key", next(x for x in r["set"]["items"] if x["id"] == short[0]["id"]))
+        code, r = self.call(f"/api/sets/{s['id']}/submit", "POST", {})
+        self.assertEqual(code, 200, r)
+        self.wait_job(r["job"]["id"])
+        _, r = self.call(f"/api/sets/{s['id']}")
+        self.assertEqual(r["set"]["status"], "graded")
+        self.assertIn("解説です", r["set"]["report"])
+        self.assertTrue(all("key" in x for x in r["set"]["items"]))
+        self.assertEqual([c["concept"] for c in r["set"]["compare"]], ch["concepts"])
+        code, _ = self.call(f"/api/sets/{s['id']}/answer", "POST", {"item": ch["id"], "value": "ア"})
+        self.assertEqual(code, 409)
+        _, r = self.call("/api/sets")
+        self.assertEqual(r["sets"][0]["status"], "graded")
+        # 分析にもバンクの択一が入る
+        _, a = self.call("/api/analysis")
+        self.assertEqual(a["analysis"]["attempts"]["drill"], 1)
+        # セットの外は読めない
+        code, _ = self.call("/api/sets/..%2Fexam")
+        self.assertEqual(code, 404)
+        self.assertEqual(server.build_prompt({"action": "grade-set", "id": s["id"]})[0], f"/grade-set {s['id']}")
+        with self.assertRaises(ValueError):
+            server.build_prompt({"action": "grade-set", "id": "../x"})
+
+
 if __name__ == "__main__":
     unittest.main()

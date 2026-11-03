@@ -9,11 +9,13 @@
 - `log/history.jsonl` … 記述式の過去の成績（1行1解答）。出題分野の選定に使う
 - `log/drill.jsonl` … 択一ドリルの成績（1行1問）
 - `log/asks.jsonl` … 解答中の質問（1行1質問。ブラウザから送ると web UI が書く）。見込みには入れず、弱点の手がかりに使う
+- `exam/concepts.md` … 分野タグを細かく分けた「論点」の一覧（`templates/concepts.md`）。問題バンクと出題の単位
+- `log/bank.jsonl` … 問題バンクのセットの成績（1行1問。`templates/bank-line.json`）
 - `log/glossary.jsonl` … 単語帳（1行1語。`templates/glossary-line.json`）。`log/glossary-state.json` は「覚えた」の記録で、web UI が書く
 
 `exam/profile.md` がない、または `<!-- TODO -->` が残っているなら、まず `/setup-exam` を案内すること。
 
-学習データ（`exam/`・`questions/`・`rubrics/`・`answers/`・`results/`・`log/`・`refs/`・`inbox/`）は `.gitignore` で追跡対象外にしている。雛形だけを共有するリポジトリなので、これらを `git add -f` しない。
+学習データ（`exam/`・`questions/`・`rubrics/`・`answers/`・`results/`・`log/`・`refs/`・`inbox/`・`bank/`・`sets/`・`reports/`）は `.gitignore` で追跡対象外にしている。雛形だけを共有するリポジトリなので、これらを `git add -f` しない。
 
 ## ディレクトリの約束
 
@@ -24,6 +26,10 @@
 | `answers/<id>.md` | 学習者の解答 | 学習者が書く |
 | `results/<id>.md` | 採点結果と講評 | 見せる |
 | `log/history.jsonl` | 成績の記録 | 集計に使う |
+| `bank/items/<id>.md` | 問題バンクの問題（択一・短い記述・長文） | 出題されたら見せる |
+| `bank/keys/<id>.md` | 問題バンクの正解・採点基準・解説 | **その問題を答える（記述は採点が終わる）まで見せない** |
+| `sets/<set>/` | `scripts/route.py` が選んだセットと、学習者の答え | 見せる |
+| `reports/<set>.md` | セットの採点・解説・知識の分析 | 見せる |
 | `refs/` | 公式過去問・解答例などの資料（git管理外） | 参照のみ |
 | `questions/assets/` | 問題の図（画像・SVG） | 見せる |
 | `templates/` | 各ファイルのひな形 | — |
@@ -39,10 +45,11 @@
 3. **採点は `grader` エージェントに任せる。** 出題した自分で採点しない。採点は厳しめでよい。
 4. 採点が終わるまで、`rubrics/` の内容や「正解の方向性」を匂わせない。ヒントを求められたら、問題文のどこを読み直すべきかだけ示す。
    解答中に「言葉の意味がわからない」と聞かれたら、その言葉の一般的な意味は答えてよい（この問題でどう使うか・何を書けばよいかには触れない）。「何を聞かれているか」には、設問文の言い換え（答える対象と形式）だけを返す。
-5. 採点後は必ず `log/history.jsonl` に1行追記する（形式は `templates/history-line.json`）。
+5. 採点後は必ず `log/history.jsonl` に1行追記する（形式は `templates/history-line.json`）。セットの記述は `log/bank.jsonl` に追記する。
 6. 生成問題は架空の組織・システムで作る。実在企業名、実在の過去問の本文の転載はしない。
 7. `refs/` の公式資料は採点・出題の参考にしてよいが、リポジトリにコミットしない。
 8. 会話は日本語。講評は「何が足りないか」「本文のどこが根拠か」「次に何をすれば良いか」を短く。
+9. **問題バンクから何を出すかは `scripts/route.py` が決める。** 自分で論点や問題を選び直さない（選び方がぶれると苦手を測れない）。在庫が足りなければ `/prepare` で作り足す。
 
 ## スキル
 
@@ -52,6 +59,8 @@
 - `/grade [id]` … 解答を採点する。チャットに貼られた解答も受け付ける
 - `/review` … 成績を分析して得意・不得意な分野、その原因、次の一手を示す（`scripts/analyze.py`）
 - `/import-past` … `refs/` の公式過去問を取り込んで、公式解答例で採点できる形にする
+- `/prepare [タグ] [数]` … 問題バンクを作る（論点の一覧、論点ごとの択一3・短い記述1、分野ごとの長文1）
+- `/grade-set <set>` … 提出されたセットの記述を採点し、解説と知識の分析のレポートを書く
 - `/glossary [言葉、…]` … 単語帳に意味のない言葉の意味を書き足す
 - `/inbox` … ブラウザの画面（`webui/`）から `inbox/` に届いた依頼を処理する。`/loop 1m /inbox` で常駐させる
 
