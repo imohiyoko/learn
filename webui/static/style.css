@@ -170,3 +170,5 @@ body:has(.timer:not([hidden])) main { padding-bottom: 72px; }
 .feedback.ng { border-left-color: var(--weak); }
 .review-item { border-bottom: 1px solid var(--line); padding: 8px 0; }
 .review-item summary { cursor: pointer; }
+.set-ask { margin: 0.75rem 0; }
+.set-ask form { margin-top: 0.4rem; }
