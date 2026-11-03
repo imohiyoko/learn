@@ -102,7 +102,7 @@ docker compose up -d    # → http://127.0.0.1:8765/
 ```
 
 - コンテナは uid 1000 のユーザーで動きます。ホストのユーザーが uid 1000 でない場合は、`compose.yaml` に `user: "<uid>:<gid>"` と、環境変数 `HOME: /tmp/home`（`claude-home` ボリュームは uid 1000 の持ち物で書き込めないため）を足してください。認証は `.env` のトークンで行うので、Claude Code の設定が残らなくても動きます
-- 別の端末から使うときは `compose.yaml` の `ports` を `"8765:8765"` にし、`command` から `--allow-no-token` を外して、`.env` に `LEARN_TOKEN` を設定します。トークンなしのままだと、`localhost` 以外の名前で開いたリクエストは断られます
+- 別の端末から使うときは `compose.yaml` の `ports` を `"8765:8765"` にし、`command` から `--allow-no-token` を外して、`.env` に `LEARN_TOKEN` を設定します。トークンなしのサーバーも `localhost` 以外の名前で開いたリクエストは断りますが、これはブラウザ経由の攻撃（DNS rebinding）への対策です。Host ヘッダは偽装できるので、ポートを外に開くときはトークンが必須です
 
 ## コマンド
 

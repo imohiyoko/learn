@@ -16,7 +16,11 @@
     }
     const r = await fetch(path, o);
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.error || r.statusText);
+    if (!r.ok) {
+      const err = new Error(data.error || r.statusText);
+      err.status = r.status;
+      throw err;
+    }
     return data;
   }
 
@@ -183,6 +187,13 @@
       try {
         r = await api(`/api/jobs/${id}?after=${seq}&wait=20`);
       } catch (err) {
+        if (gen !== pollGen) return;
+        if (err.status === 404) {
+          // 会話が消えた（サーバーの再起動や古い会話の整理）。待ち続けても戻らないので止める
+          notice("この会話はもうサーバーにありません。新しくはじめてください", "error");
+          try { localStorage.removeItem("learn.job"); } catch (e) {}
+          return;
+        }
         // サーバーが一時的に落ちても、戻ってきたら監視を続ける
         lost = true;
         notice("サーバーとの接続が切れました。再接続しています…（" + esc(err.message) + "）", "error");
@@ -227,9 +238,12 @@
     if (!isDrill && fresh) {
       try {
         const a = await api(`/api/file?kind=answers&id=${encodeURIComponent(id)}`);
+        if (!job || job.id !== jid) return;
         $("#answer-text").value = a.text;
         $("#answer-status").textContent = "";
-      } catch (e) { $("#answer-text").value = ""; }
+      } catch (e) {
+        if (job && job.id === jid) $("#answer-text").value = "";
+      }
     }
   }
 

@@ -278,6 +278,12 @@ class Job:
             self.events.append(ev)
             self.cond.notify_all()
 
+    def finish(self, status):
+        # 状態の更新と end を同じロックの中で行い、見る側が途中の状態を読まないようにする
+        with self.cond:
+            self.status = status
+            self.add({"type": "end"})
+
     def summary(self):
         return {"id": self.id, "title": self.title, "created": self.created, "status": self.status,
                 "question_ids": self.question_ids, "target": self.target, "can_reply": bool(self.session_id) and self.status != "running"}
@@ -344,8 +350,9 @@ class Jobs:
                 raise RuntimeError("ほかの作業が実行中です。終わってからもう一度どうぞ")
             if not job.session_id:
                 raise RuntimeError("この会話は続けられません")
-            job.status = "running"
-        job.add({"type": "user", "text": text})
+            with job.cond:
+                job.status = "running"
+                job.add({"type": "user", "text": text})
         threading.Thread(target=run_claude, args=(job, text, job.session_id), daemon=True).start()
         return job.summary()
 
@@ -530,8 +537,7 @@ def run_claude(job, prompt, resume=None):
             proc.kill()
             proc.wait()
         job.add({"type": "error", "text": f"{type(e).__name__}: {e}"})
-        job.status = "error"
-        job.add({"type": "end"})
+        job.finish("error")
 
 
 def _run_claude(job, prompt, resume=None):
@@ -540,8 +546,7 @@ def _run_claude(job, prompt, resume=None):
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8")
     except FileNotFoundError:
         job.add({"type": "error", "text": f"`{claude_bin()}` が見つかりません。Claude Code をインストールしてログインしてください"})
-        job.status = "error"
-        job.add({"type": "end"})
+        job.finish("error")
         return
     job.proc = proc
     err = []
@@ -566,8 +571,7 @@ def _run_claude(job, prompt, resume=None):
     if code != 0:
         msg = "".join(err).strip() or f"claude が終了コード {code} で終わりました"
         job.add({"type": "error", "text": msg[-2000:]})
-    job.status = "error" if code != 0 else "idle"
-    job.add({"type": "end"})
+    job.finish("error" if code != 0 else "idle")
 
 
 # ---------------------------------------------------------------- HTTP
