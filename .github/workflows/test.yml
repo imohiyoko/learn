@@ -17,7 +17,7 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: 記録がない状態でも動くか
         run: |
-          cp examples/sc/profile.md exam/profile.md
+          cp tests/fixtures/profile.md exam/profile.md
           python scripts/stats.py
           python scripts/analyze.py
           python scripts/analyze.py --json > /dev/null

@@ -1,11 +1,11 @@
 ---
 name: drill
-description: 問題バンクの択一を数問まとめて出題し、答え合わせ・解説・記録まで行う。知識の確認や午前・科目A対策、「択一やりたい」「選択問題」「小テスト」や /drill で使う。
+description: 問題バンクの択一を数問まとめて出題し、答え合わせ・解説・記録まで行う。知識の確認や択一式の試験対策、「択一やりたい」「選択問題」「小テスト」や /drill で使う。
 ---
 
 # 択一ドリル
 
-引数：任意で分野タグと問題数（例：`/drill`、`/drill web`、`/drill auth 5`）。
+引数：任意で分野タグと問題数（例：`/drill`、`/drill <タグ>`、`/drill <タグ> 5`）。
 
 問題はその場で作らない。`/prepare` で前もって作り、verifier の確認を通した問題バンク（`bank/`）の択一から、`scripts/route.py` が選んだものだけを出す（自分で選び直さない）。在庫が足りなければ、ある分だけ出して知らせる。作り足すのは学習者が好きなときに `/prepare` で行う。
 
@@ -43,4 +43,4 @@ description: 問題バンクの択一を数問まとめて出題し、答え合�
 
 ## 公式の過去問の択一
 
-公式の過去問（科目A・午前など）を択一で解きたいときは、`refs/` の問題冊子から `bank/items/b-past-<年度>-a<番号>.md`（`templates/bank/choice.md` の形。`verified: true`、`concepts` は `exam/concepts.md` から当てはまる論点）と `bank/keys/b-past-<年度>-a<番号>.md`（`answer` は公式の解答だけを使う）に取り込む。取り込んだ問題は、ほかのバンクの問題と同じく route.py が選ぶ。
+公式の過去問の択一を択一で解きたいときは、`refs/` の問題冊子から `bank/items/b-past-<年度>-a<番号>.md`（`templates/bank/choice.md` の形。`verified: true`、`concepts` は `exam/concepts.md` から当てはまる論点）と `bank/keys/b-past-<年度>-a<番号>.md`（`answer` は公式の解答だけを使う）に取り込む。取り込んだ問題は、ほかのバンクの問題と同じく route.py が選ぶ。

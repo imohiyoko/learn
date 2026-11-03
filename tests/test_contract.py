@@ -11,10 +11,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tests"))
-sys.path.insert(0, str(ROOT / "webui"))
+sys.path.insert(0, str(ROOT))
 
 import schema_lite  # noqa: E402
-import server  # noqa: E402
+from learn.web import files, glossary, sets  # noqa: E402
 from test_route import make_bank  # noqa: E402
 
 # テンプレート → スキーマ
@@ -73,10 +73,10 @@ class ServerLinesTest(unittest.TestCase):
             (self.tmp / d).mkdir(exist_ok=True)
         (self.tmp / "questions" / "q1.md").write_text(
             "---\nid: q1\nsource: generated        # generated | past\ntags: [web, auth]\n---\n# 問\n", encoding="utf-8")
-        server.configure(self.tmp)
+        files.configure(self.tmp)
 
     def tearDown(self):
-        server.configure(ROOT)
+        files.configure(ROOT)
         shutil.rmtree(self.tmp)
 
     def check(self, log, name):
@@ -86,32 +86,32 @@ class ServerLinesTest(unittest.TestCase):
             self.assertEqual(schema_lite.errors(r, schema_lite.load(name)), [], r)
 
     def test_ask(self):
-        server.record_ask("q1", "設問1(2)", "word", "p=none の意味")
-        server.record_ask("q1", None, "worry", "時間が足りない")
-        st = server.create_set(n=2, kind="choice")
-        server.ask_set_word(st["id"], st["items"][0]["id"], "SameSite")
+        glossary.record_ask("q1", "設問1(2)", "word", "p=none の意味")
+        glossary.record_ask("q1", None, "worry", "時間が足りない")
+        st = sets.create_set(n=2, kind="choice")
+        sets.ask_set_word(st["id"], st["items"][0]["id"], "SameSite")
         self.check("asks.jsonl", "ask-line")
 
     def test_glossary(self):
-        server.add_term("DMARC", "送信ドメイン認証の結果の扱いを宣言する仕組み。", ["network"])
+        glossary.add_term("DMARC", "送信ドメイン認証の結果の扱いを宣言する仕組み。", ["network"])
         self.check("glossary.jsonl", "glossary-line")
 
     def test_bank_choice(self):
-        s = server.create_set(n=4, kind="choice")
+        s = sets.create_set(n=4, kind="choice")
         for it in s["items"]:
-            server.answer_set_item(s["id"], it["id"], "ア")
+            sets.answer_set_item(s["id"], it["id"], "ア")
         self.check("bank.jsonl", "bank-line")
 
     def test_bank_choice_confidence(self):
-        s = server.create_set(n=3, kind="choice")
+        s = sets.create_set(n=3, kind="choice")
         a, b, c = [it["id"] for it in s["items"]]
-        server.answer_set_item(s["id"], a, "ア", "guess")
-        server.answer_set_item(s["id"], b, "ア", "sure")
+        sets.answer_set_item(s["id"], a, "ア", "guess")
+        sets.answer_set_item(s["id"], b, "ア", "sure")
         with self.assertRaises(ValueError):
-            server.answer_set_item(s["id"], c, "ア", "maybe")
-        server.answer_set_item(s["id"], c, "ア")  # 確信度なしの古い呼び出しも受ける
+            sets.answer_set_item(s["id"], c, "ア", "maybe")
+        sets.answer_set_item(s["id"], c, "ア")  # 確信度なしの古い呼び出しも受ける
         self.check("bank.jsonl", "bank-line")
-        rows = [json.loads(x) for x in (server.ROOT / "log" / "bank.jsonl").read_text(encoding="utf-8").splitlines()]
+        rows = jsonl(files.ROOT / "log" / "bank.jsonl")
         self.assertEqual([r.get("confidence") for r in rows], ["guess", "sure", None])
 
 

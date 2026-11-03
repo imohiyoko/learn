@@ -1,1 +1,1 @@
-{"term": "DMARC", "meaning": "Domain-based Message Authentication, Reporting and Conformance。SPF・DKIM の結果と From のドメインの一致を見て、認証に失敗したメールの扱い（none / quarantine / reject）をドメインの持ち主が DNS で宣言する仕組み。", "tags": ["network"], "source": "ask", "from": "20261025-2130-network", "added_at": "2026-10-25T21:40:00+09:00"}
+{"term": "（言葉）", "meaning": "（その言葉の一般的な意味。2〜3文で）", "tags": ["topic"], "source": "ask", "from": "20261025-2130-topic", "added_at": "2026-10-25T21:40:00+09:00"}

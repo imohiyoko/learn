@@ -64,7 +64,7 @@
 
     <div class="card">
       <h2>資格を選ぶ</h2>
-      <p class="muted small">用意してある資格はすぐに使えます。ほかの資格は名前を入れると、Claude と対話して設定します。</p>
+      <p class="muted small">勉強したい資格の名前を入れると、Claude と対話して設定します。前に作った設定（<code>examples/</code>）があれば、ここからすぐ切り替えられます。</p>
       <div id="home-examples" class="exam-grid"></div>
       <form id="home-setup" class="row">
         <input name="exam" maxlength="60" placeholder="例：応用情報技術者試験（空欄なら Claude が聞きます）" aria-label="勉強したい資格">
@@ -133,7 +133,7 @@
         <details id="set-ask" class="set-ask">
           <summary class="small">わからない言葉を聞く</summary>
           <form id="set-ask-form" class="row">
-            <input name="term" maxlength="40" placeholder="例：DMARC" aria-label="わからない言葉">
+            <input name="term" maxlength="40" placeholder="わからない言葉" aria-label="わからない言葉">
             <button type="submit" class="small">意味を聞く</button>
           </form>
           <p class="muted small">言葉の一般的な意味だけを返します（この問題の答えには触れません）。聞いた言葉は単語帳に入り、点数には影響しません。</p>
@@ -349,7 +349,7 @@
   <section id="tab-settings" class="tab" hidden>
     <div class="card" id="setup-card">
       <h2>試験を選ぶ</h2>
-      <p class="muted small">サンプルの設定をコピーするか、Claude と対話して作ります（<code>/setup-exam</code>）。</p>
+      <p class="muted small">Claude と対話して作ります（<code>/setup-exam</code>）。前に作った設定（<code>examples/</code>）があれば、コピーして使えます。</p>
       <div class="row">
         <select id="example-select"></select>
         <button id="copy-example">この設定を使う</button>
@@ -373,6 +373,6 @@
 
 <script src="md.js"></script>
 <script src="answer.js"></script>
-<script src="app.js"></script>
+<script type="module" src="main.js"></script>
 </body>
 </html>
