@@ -677,11 +677,16 @@
     const ch = s.items.filter((it) => it.kind === "choice" && it.result);
     const ok = ch.filter((it) => it.result.correct).length;
     $("#set-finish-text").innerHTML = s.status === "submitted"
-      ? "提出しました。Claude が記述を採点し、解説と分析のレポートを書いています。下の会話欄に進み具合が出ます。"
+      ? "提出しました。Claude が記述を採点し、解説と分析のレポートを書いています。下の会話欄に進み具合が出ます。" +
+        "採点が途中で止まったときは「採点をやり直す」を押してください。"
       : `択一 ${ok} / ${ch.length}問 正解。` + (left ? `<b>まだ答えていない問題が ${left}問</b>あります（答えていない択一は記録しません。記述は0点になります）。` : "全部答えました。") +
         "提出すると、記述を採点し、問題ごとの解説と論点ごとの分析をレポートに保存します。";
     $("#set-submit").hidden = $("#set-back").hidden = s.status !== "open";
+    $("#set-regrade").hidden = s.status !== "submitted";
   }
+  // 提出後に採点の会話がエラーや停止で終わると、セットは「採点中」のまま残る。そこから採点だけをもう一度始める
+  // （採点中なら、サーバーが「いま採点中です」と断る）
+  $("#set-regrade").addEventListener("click", () => { if (SET) start({ action: "grade-set", id: SET.id }); });
   $("#set-submit").addEventListener("click", async () => {
     const left = SET.items.filter((it) => it.answer == null).length;
     if (!confirm(left ? `まだ答えていない問題が ${left}問あります。提出しますか？` : "提出して、採点とレポートを作りますか？")) return;
