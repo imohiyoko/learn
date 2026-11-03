@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/imohiyoko/learn/schema/ask-line.schema.json",
+  "title": "log/asks.jsonl の1行",
+  "description": "解答中の質問。web UI のサーバーが書く。",
+  "type": "object",
+  "required": [
+    "id",
+    "tags",
+    "kind",
+    "text",
+    "asked_at"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "質問した問題の id"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]*$"
+      },
+      "minItems": 1,
+      "maxItems": 20,
+      "description": "分野タグ。先頭が主タグ"
+    },
+    "part": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^設問\\d+(\\(\\d+\\))?$"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "word",
+        "ask",
+        "worry"
+      ],
+      "description": "word 言葉の意味／ask 何を聞かれているか／worry 不安・その他"
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "asked_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "タイムゾーン付きの ISO 8601（RFC 3339）"
+    }
+  },
+  "additionalProperties": false
+}
