@@ -623,6 +623,65 @@
     $("#set-prev").disabled = setAt === 0;
     $("#set-next").textContent = setAt === s.items.length - 1 ? (s.status === "open" ? "提出へ" : "次へ") : "次へ";
     $("#set-status").textContent = it.kind === "short" ? "記述は提出後にまとめて採点します" : "";
+    drawSetAsk();
+  }
+
+  // ---------------------------------------------------------- セットの途中で、わからない言葉を聞く
+  // サーバーが記録し（log/asks.jsonl。点数には入れない）、/glossary で意味を作る。届いたら単語帳から拾って表示する。
+  // 答える前の択一で選択肢に出てくる言葉は、意味がそのまま答えになりうるので、答えたあとに回す
+  const setAsks = {}; // {問題id: [{term, state: wait|deferred|busy|late|done, meaning}]}
+  const termKey = (s) => String(s).normalize("NFKC").replace(/\s+/g, "").toLowerCase();
+  const ASK_STATE = {
+    wait: "意味を作っています…",
+    deferred: "選択肢に出てくる言葉なので、答えたあとに意味を出します",
+    busy: "Claude がほかの作業中です。言葉は単語帳に入れたので、あとで「意味を書いてもらう」から作れます",
+    late: "まだ届いていません。届いたら単語帳で見られます",
+  };
+  function drawSetAsk() {
+    const it = SET && SET.items[setAt];
+    if (!it) return;
+    $("#set-ask-out").innerHTML = (setAsks[it.id] || []).map((a) =>
+      `<p><b>${esc(a.term)}</b>：${a.meaning ? esc(a.meaning) : esc(ASK_STATE[a.state] || "")}</p>`).join("");
+  }
+  function applyAsk(a, r) {
+    if (r.meaning) Object.assign(a, { meaning: r.meaning, state: "done" });
+    else a.state = r.deferred ? "deferred" : r.busy ? "busy" : "wait";
+    drawSetAsk();
+    if (a.state === "wait") watchMeaning(a);
+  }
+  async function watchMeaning(a) {
+    const key = termKey(a.term);
+    for (let i = 0; i < 45; i++) {
+      await new Promise((ok) => setTimeout(ok, 4000));
+      try {
+        const g = await api("/api/glossary");
+        const t = g.terms.find((x) => x.meaning && x.key === key) || g.terms.find((x) => x.meaning && x.key && x.key.startsWith(key));
+        if (t) { Object.assign(a, { meaning: t.meaning, state: "done" }); drawSetAsk(); return; }
+      } catch (e) { /* 次の回にもう一度 */ }
+    }
+    a.state = "late";
+    drawSetAsk();
+  }
+  $("#set-ask-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const it = SET && SET.items[setAt];
+    const term = e.target.term.value.trim();
+    if (!it || !term) return;
+    try {
+      const r = await api(`/api/sets/${SET.id}/ask`, { method: "POST", body: { item: it.id, term } });
+      e.target.term.value = "";
+      const a = { term };
+      (setAsks[it.id] = setAsks[it.id] || []).push(a);
+      applyAsk(a, r);
+    } catch (err) { notice(esc(err.message), "error"); }
+  });
+  // 答えたら、答えのあとに回した言葉の意味を作る
+  function resumeDeferred(sid, iid) {
+    for (const a of setAsks[iid] || []) {
+      if (a.state !== "deferred") continue;
+      api(`/api/sets/${sid}/ask`, { method: "POST", body: { item: iid, term: a.term, again: true } })
+        .then((r) => applyAsk(a, r)).catch((err) => notice(esc(err.message), "error"));
+    }
   }
 
   function shortCount() {
@@ -655,6 +714,7 @@
     try {
       const { set } = await api(`/api/sets/${SET.id}/answer`, { method: "POST", body: { item: it.id, value } });
       SET = set;
+      resumeDeferred(set.id, it.id);
       if (it.kind === "short") setAt++;
       drawSet();
     } catch (e) { notice(esc(e.message), "error"); $("#set-answer").disabled = false; }

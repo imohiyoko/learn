@@ -998,6 +998,42 @@ def answer_set_item(sid, iid, value):
         return s
 
 
+WORD_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def ask_set_word(sid, iid, term, again=False):
+    """セットを解いている途中の「わからない言葉」。記録して、意味を作るかどうかを返す。
+    答える前の択一で、選択肢に出てくる言葉は、意味がそのまま答えになりうるので、答えたあとに回す（deferred）。
+    again=True は、答えたあとに回した言葉の意味を作り直すとき（記録はもうあるので足さない）。"""
+    term = str(term or "").strip()
+    if not term or len(term) > 40 or term.startswith("/") or WORD_RE.search(term) or "、" in term or "," in term:
+        raise ValueError("言葉は1つ、40字以内で書いてください")
+    s = load_set(sid)
+    if not s:
+        raise LookupError("そのセットはありません")
+    it = next((x for x in s["items"] if x["id"] == iid), None)
+    if not it:
+        raise LookupError("その問題はこのセットにありません")
+    answered = iid in s.get("results", {}) or iid in s.get("answers", {})
+    if again:
+        if not answered:
+            raise RuntimeError("答えてから、もう一度どうぞ")
+        return {"deferred": False, "meaning": known_meaning(term_key(term))}
+    append_jsonl(ASKS, {"id": iid, "set": sid, "tags": it.get("tags") or [], "concepts": it.get("concepts") or [],
+                        "part": None, "kind": "word", "text": term, "asked_at": now_iso()})
+    k = term_key(term)
+    if it["kind"] == "choice" and not answered:
+        b = bank_item(iid) or {"options": []}
+        if any(k in term_key(o["text"]) for o in b["options"]):
+            return {"deferred": True}
+    return {"deferred": False, "meaning": known_meaning(k)}
+
+
+def known_meaning(key):
+    """単語帳にもう意味が入っていれば、その意味（Claude に頼まずに出せる）"""
+    return next((t["meaning"] for t in glossary()["terms"] if t["key"] == key and t["meaning"]), None)
+
+
 def submit_set(sid):
     with SET_LOCK:
         s = load_set(sid)
@@ -1274,6 +1310,20 @@ class Handler(BaseHTTPRequestHandler):
             if m:
                 s = answer_set_item(m.group(1), str(body.get("item") or ""), body.get("value"))
                 return self.send_json({"set": set_view(s)})
+            m = re.match(r"^/api/sets/([^/]+)/ask$", path)
+            if m:
+                # セットを解いている途中の「わからない言葉」：記録して、/glossary で意味を作る
+                term = str(body.get("term") or "").strip()
+                with self.jobs.lock:
+                    r = ask_set_word(m.group(1), str(body.get("item") or ""), term, bool(body.get("again")))
+                    if r["deferred"] or r["meaning"]:
+                        return self.send_json(r)
+                    try:
+                        job = self.jobs.start(f"/glossary {term}", f"単語帳 {term}")
+                    except RuntimeError:
+                        # Claude が別の作業中。言葉は記録したので、単語帳からあとで意味を作れる
+                        return self.send_json({"deferred": False, "busy": True})
+                return self.send_json({"deferred": False, "job": job if isinstance(job, dict) else job.summary()})
             m = re.match(r"^/api/sets/([^/]+)/submit$", path)
             if m:
                 sid = m.group(1)

@@ -122,6 +122,15 @@
           <div id="set-short-count" class="ans-count"></div>
         </div>
         <div id="set-feedback" class="feedback md" hidden></div>
+        <details id="set-ask" class="set-ask">
+          <summary class="small">わからない言葉を聞く</summary>
+          <form id="set-ask-form" class="row">
+            <input name="term" maxlength="40" placeholder="例：DMARC" aria-label="わからない言葉">
+            <button type="submit" class="small">意味を聞く</button>
+          </form>
+          <p class="muted small">言葉の一般的な意味だけを返します（この問題の答えには触れません）。聞いた言葉は単語帳に入り、点数には影響しません。</p>
+          <div id="set-ask-out" class="small"></div>
+        </details>
         <div class="row">
           <button id="set-prev" type="button">前へ</button>
           <button id="set-answer" class="primary" type="button">答える</button>

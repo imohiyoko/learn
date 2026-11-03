@@ -483,6 +483,54 @@ class WebUITest(unittest.TestCase):
         with self.assertRaises(ValueError):
             server.build_prompt({"action": "grade-set", "id": "../x"})
 
+    def test_12_set_word_ask(self):
+        # test_11 の問題バンクを使う。選択肢は「正しい／違う」
+        code, r = self.call("/api/sets", "POST", {"n": 1, "kind": "choice", "tag": "web"})
+        self.assertEqual(code, 200, r)
+        s = r["set"]
+        it = s["items"][0]
+        url = f"/api/sets/{s['id']}/ask"
+        asks = self.tmp / "log" / "asks.jsonl"
+        before = len(asks.read_text(encoding="utf-8").splitlines()) if asks.exists() else 0
+        # 選択肢にある言葉は、答えるまで意味を出さない（答えを教えてしまうので）
+        code, r = self.call(url, "POST", {"item": it["id"], "term": "正しい"})
+        self.assertEqual((code, r), (200, {"deferred": True}))
+        # 答える前の「もう一度」は断る
+        code, _ = self.call(url, "POST", {"item": it["id"], "term": "正しい", "again": True})
+        self.assertEqual(code, 409)
+        # 単語帳に意味がある言葉は、その場で返す（claude は動かさない）
+        code, r = self.call(url, "POST", {"item": it["id"], "term": "ｄｍａｒｃ"})
+        self.assertEqual((code, r), (200, {"deferred": False, "meaning": "送信ドメイン認証の方針"}))
+        # 意味のない言葉は /glossary を動かす
+        code, r = self.call(url, "POST", {"item": it["id"], "term": "HSTS"})
+        self.assertEqual(code, 200, r)
+        if r.get("job"):
+            self.assertEqual(r["job"]["title"], "単語帳 HSTS")
+            self.wait_job(r["job"]["id"])
+        else:
+            self.assertTrue(r.get("busy"), r)
+        # おかしい言葉・ない問題・ないセット
+        for bad in ({"term": ""}, {"term": "/review"}, {"term": "a、b"}, {"term": "x" * 41}, {"term": "a\nb"}):
+            code, _ = self.call(url, "POST", {"item": it["id"], **bad})
+            self.assertEqual(code, 400, bad)
+        code, _ = self.call(url, "POST", {"item": "nope", "term": "HSTS"})
+        self.assertEqual(code, 404)
+        code, _ = self.call("/api/sets/set-nope/ask", "POST", {"item": it["id"], "term": "HSTS"})
+        self.assertEqual(code, 404)
+        rows = [json.loads(x) for x in asks.read_text(encoding="utf-8").splitlines()][before:]
+        self.assertEqual([(x["text"], x["set"], x["id"], x["kind"]) for x in rows],
+                         [(t, s["id"], it["id"], "word") for t in ("正しい", "ｄｍａｒｃ", "HSTS")])
+        # 答えたあとの「もう一度」は、単語帳にまだなければ /glossary を動かす
+        code, _ = self.call(f"/api/sets/{s['id']}/answer", "POST", {"item": it["id"], "value": "ア"})
+        self.assertEqual(code, 200)
+        code, r = self.call(url, "POST", {"item": it["id"], "term": "正しい", "again": True})
+        self.assertEqual(code, 200, r)
+        self.assertFalse(r["deferred"])
+        if r.get("job"):
+            self.assertEqual(r["job"]["title"], "単語帳 正しい")
+            self.wait_job(r["job"]["id"])
+        self.assertEqual(len(asks.read_text(encoding="utf-8").splitlines()), before + 3, "もう一度は記録しない")
+
 
 if __name__ == "__main__":
     unittest.main()
