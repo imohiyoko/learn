@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-import analyze  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from learn import analyze  # noqa: E402
 
 TAGS = {"web": ("Web", 1.5), "net": ("ネットワーク", 1.0), "crypto": ("暗号", 0.8), "law": ("法令", 0.5)}
 
