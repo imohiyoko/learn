@@ -24,6 +24,7 @@
 """
 import argparse
 import errno
+import hashlib
 import hmac
 import json
 import os
@@ -659,11 +660,16 @@ class Handler(BaseHTTPRequestHandler):
         host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]")
         return host in self.allowed_hosts
 
+    def cookie_name(self):
+        # Cookie はポートを区別しないので、同じ PC で別のトークンのサーバーを並べても混ざらないよう名前を分ける
+        return "learn_token_" + hashlib.sha256(self.token.encode()).hexdigest()[:12]
+
     def authed(self):
         if not self.token:
             return True
         cookie = SimpleCookie(self.headers.get("Cookie") or "")
-        given = cookie["learn_token"].value if "learn_token" in cookie else ""
+        name = self.cookie_name()
+        given = cookie[name].value if name in cookie else ""
         given = self.headers.get("X-Learn-Token") or given
         return hmac.compare_digest(given, self.token)
 
@@ -695,7 +701,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.token and "token" in q and hmac.compare_digest(q["token"], self.token) and self.host_ok():
             self.send_response(HTTPStatus.SEE_OTHER)
-            self.send_header("Set-Cookie", f"learn_token={self.token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000")
+            self.send_header("Set-Cookie", f"{self.cookie_name()}={self.token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000")
             self.send_header("Location", path)
             self.end_headers()
             return
@@ -840,6 +846,8 @@ PORT_TRIES = 20  # 使用中なら次の番号を順に試す数
 
 
 def make_server(host="127.0.0.1", port=DEFAULT_PORT, token=None, runner="loop", tries=1):
+    if not 0 <= port <= 65535:
+        raise SystemExit("--port は 0〜65535 で指定してください（1024〜49151 が無難）")
     if runner not in RUNNERS:
         raise SystemExit(f"--runner は {' / '.join(RUNNERS)} のどれかです")
     if host not in LOOPBACK and not token:
@@ -857,8 +865,10 @@ def make_server(host="127.0.0.1", port=DEFAULT_PORT, token=None, runner="loop", 
         try:
             return cls((host, p), handler)
         except OSError as e:
-            # 使用中（EADDRINUSE / Windows の WSAEADDRINUSE・WSAEACCES）なら次の番号へ
-            if e.errno not in (errno.EADDRINUSE, errno.EACCES, 10048, 10013) or port == 0:
+            # 使用中（EADDRINUSE / Windows の WSAEADDRINUSE・WSAEACCES）なら次の番号へ。
+            # Windows 以外の EACCES は権限不足（1023 以下のポートなど）なので、そのまま止める
+            in_use = e.errno in (errno.EADDRINUSE, 10048) or (os.name == "nt" and e.errno in (errno.EACCES, 10013))
+            if not in_use or port == 0:
                 raise
             last = e
     raise SystemExit(f"ポート {port}〜{p} はすべて使用中です。--port で別の番号を指定してください（{last}）")
@@ -873,8 +883,6 @@ def main():
                     help="loop：依頼を inbox/ に置き、常駐している Claude Code（/loop 1m /inbox）に処理させる（既定）。"
                          "cli：このサーバーが claude -p を起動して処理する")
     args = ap.parse_args()
-    if not 0 <= args.port <= 65535:
-        raise SystemExit("--port は 0〜65535 で指定してください（1024〜49151 が無難）")
     srv = make_server(args.host, args.port, os.environ.get("LEARN_TOKEN"), args.runner, tries=PORT_TRIES)
     port = srv.server_address[1]
     if port != args.port and args.port:

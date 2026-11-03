@@ -237,7 +237,7 @@ class WebUITest(unittest.TestCase):
             with self.assertRaises(urllib.error.HTTPError) as cm:
                 urllib.request.urlopen(base + "/api/state")
             self.assertEqual(cm.exception.code, 401)
-            req = urllib.request.Request(base + "/api/state", headers={"Cookie": "learn_token=secret"})
+            req = urllib.request.Request(base + "/api/state", headers={"Cookie": f"learn_token_{server.hashlib.sha256(b'secret').hexdigest()[:12]}=secret"})
             with urllib.request.urlopen(req) as r:
                 self.assertEqual(r.status, 200)
         finally:
