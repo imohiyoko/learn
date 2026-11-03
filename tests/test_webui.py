@@ -178,6 +178,24 @@ class WebUITest(unittest.TestCase):
             self.assertIn("1ア 2ウ", (d / "001-user.md").read_text(encoding="utf-8"))
             _, jobs = self.call("/api/jobs")
             self.assertEqual(jobs["jobs"][0]["id"], jid)
+            self.assertFalse(list(d.glob("*.tmp")))
+
+            # 返信で /grade を頼んだら、その問題は採点中（解答の保存も、同じ問題の採点依頼も断る）
+            qid = "20261103-1300-web"
+            (self.tmp / "questions" / f"{qid}.md").write_text("---\nverified: true\n---\n# 問題", encoding="utf-8")
+            (d / "001-claude.md").write_text("答え合わせしました。", encoding="utf-8")
+            code, r = self.call(f"/api/jobs/{jid}/reply", "POST", {"text": f"/grade {qid}"})
+            self.assertEqual(code, 200, r)
+            self.assertEqual(r["job"]["target"], qid)
+            code, _ = self.call(f"/api/answers/{qid}", "PUT", {"text": "書き直し"})
+            self.assertEqual(code, 409)
+            code, _ = self.call("/api/run", "POST", {"action": "grade", "id": qid})
+            self.assertEqual(code, 409)
+
+            # 4桁の番号も読める
+            (d / "1000-user.md").write_text("続き", encoding="utf-8")
+            _, r = self.call(f"/api/jobs/{jid}")
+            self.assertEqual(r["events"][-1]["text"], "続き")
             code, _ = self.call("/api/jobs/..%2F..%2Fexam")
             self.assertEqual(code, 404)
         finally:

@@ -24,8 +24,11 @@
     return data;
   }
 
-  function notice(msg, kind) {
+  // owner は通知を出した側（接続断の通知を、再接続したときにだけ消すため）
+  let noticeOwner = null;
+  function notice(msg, kind, owner) {
     const n = $("#notice");
+    noticeOwner = msg ? owner || null : null;
     if (!msg) { n.hidden = true; return; }
     n.hidden = false;
     n.className = "notice " + (kind || "");
@@ -192,16 +195,18 @@
           // 会話が消えた（サーバーの再起動や古い会話の整理）。待ち続けても戻らないので止める
           notice("この会話はもうサーバーにありません。新しくはじめてください", "error");
           try { localStorage.removeItem("learn.job"); } catch (e) {}
+          setStatus({ status: "error", can_reply: false });
+          job = null;
           return;
         }
         // サーバーが一時的に落ちても、戻ってきたら監視を続ける
         lost = true;
-        notice("サーバーとの接続が切れました。再接続しています…（" + esc(err.message) + "）", "error");
+        notice("サーバーとの接続が切れました。再接続しています…（" + esc(err.message) + "）", "error", "conn");
         await sleep(delay);
         delay = Math.min(delay * 2, 15000);
         continue;
       }
-      if (lost) { notice(""); lost = false; delay = 1000; }
+      if (lost) { if (noticeOwner === "conn") notice(""); lost = false; delay = 1000; }
       if (gen !== pollGen || !job || job.id !== id) return;
       r.events.forEach(addEvent);
       seq += r.events.length;
@@ -236,13 +241,20 @@
     const isDrill = id.startsWith("drill-");
     $("#answer-box").hidden = isDrill;
     if (!isDrill && fresh) {
+      // 読み込みが終わるまでは保存させない（空の解答で上書きしないように）
+      const load = (answerLoad = { id, jid, state: "loading" });
+      $("#answer-text").value = "";
       try {
         const a = await api(`/api/file?kind=answers&id=${encodeURIComponent(id)}`);
-        if (!job || job.id !== jid) return;
+        if (answerLoad !== load || !job || job.id !== jid) return;
         $("#answer-text").value = a.text;
         $("#answer-status").textContent = "";
+        load.state = "ok";
       } catch (e) {
-        if (job && job.id === jid) $("#answer-text").value = "";
+        if (answerLoad !== load || !job || job.id !== jid) return;
+        if (e.status === 404) { load.state = "ok"; return; } // まだ書いていない
+        load.state = "failed";
+        notice("解答を読み込めませんでした。再読み込みしてください（" + esc(e.message) + "）", "error");
       }
     }
   }
@@ -260,8 +272,12 @@
     $("#answer-box").hidden = true;
   }
 
+  let answerLoad = null;
   async function saveAnswer() {
     if (!currentQ) return;
+    if (!answerLoad || answerLoad.id !== currentQ || answerLoad.state !== "ok") {
+      throw new Error(answerLoad && answerLoad.state === "loading" ? "解答を読み込み中です" : "解答を読み込めていないので保存できません");
+    }
     await api(`/api/answers/${encodeURIComponent(currentQ)}`, { method: "PUT", body: { text: $("#answer-text").value } });
     $("#answer-status").textContent = "保存しました " + new Date().toLocaleTimeString();
   }
@@ -346,9 +362,12 @@
   // ---------------------------------------------------------- 設定
   let profileDirty = false;
   $("#profile-text").addEventListener("input", () => { profileDirty = true; });
+  let profileReq = 0;
   async function loadProfile(force) {
     if (profileDirty && !force) return; // 書きかけを消さない
+    const req = ++profileReq;
     const { text } = await api("/api/profile");
+    if (req !== profileReq) return; // あとから出した読み込みを優先する
     if (profileDirty && !force) return;
     profileDirty = false;
     $("#profile-text").value = text || "";
@@ -357,22 +376,31 @@
   $("#copy-example").addEventListener("click", async () => {
     const key = $("#example-select").value;
     if (!key) return;
+    const box = $("#profile-text");
+    box.disabled = true; // コピーしている間の入力は置き換えで消えるので、止めておく
     try {
-      await api("/api/setup-example", { method: "POST", body: { key } });
+      try {
+        await api("/api/setup-example", { method: "POST", body: { key } });
+      } catch (e) {
+        if (!/すでに/.test(e.message)) return notice(esc(e.message), "error");
+        if (!confirm("いまの exam/profile.md を上書きしますか？（学習の記録は消えません）")) return;
+        await api("/api/setup-example", { method: "POST", body: { key, overwrite: true } });
+      }
+      await loadProfile(true);
+      await loadState();
+      $("#profile-status").textContent = "コピーしました。目標受験時期と学習者メモを書き換えて保存してください。";
     } catch (e) {
-      if (!/すでに/.test(e.message)) return notice(esc(e.message), "error");
-      if (!confirm("いまの exam/profile.md を上書きしますか？（学習の記録は消えません）")) return;
-      await api("/api/setup-example", { method: "POST", body: { key, overwrite: true } });
+      notice(esc(e.message), "error");
+    } finally {
+      box.disabled = false;
     }
-    await loadProfile(true);
-    await loadState();
-    $("#profile-status").textContent = "コピーしました。目標受験時期と学習者メモを書き換えて保存してください。";
   });
   $("#setup-chat").addEventListener("click", () => start({ action: "setup" }));
   $("#save-profile").addEventListener("click", async () => {
     try {
-      await api("/api/profile", { method: "PUT", body: { text: $("#profile-text").value } });
-      profileDirty = false;
+      const sent = $("#profile-text").value;
+      await api("/api/profile", { method: "PUT", body: { text: sent } });
+      if ($("#profile-text").value === sent) profileDirty = false; // 保存中に書き足した分は未保存のまま
       $("#profile-status").textContent = "保存しました";
       loadState();
     } catch (e) { notice(esc(e.message), "error"); }

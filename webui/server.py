@@ -259,6 +259,15 @@ def build_prompt(body):
     raise ValueError("不明な操作です")
 
 
+GRADE_RE = re.compile(r"^/grade\s+(\S+)")
+
+
+def grade_target(text):
+    """返信が `/grade <id>` なら、その id（採点中の解答の保存を止めるのに使う）"""
+    m = GRADE_RE.match(text.strip())
+    return m.group(1) if m and ID_RE.match(m.group(1)) else None
+
+
 class Job:
     def __init__(self, title, target=None):
         self.target = target
@@ -293,7 +302,7 @@ class Jobs:
     KEEP = 30
 
     def __init__(self):
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()  # 採点中の確認と保存・開始を同じロックでまとめるため、入れ子で取れるものにする
         self.jobs = {}
         self.order = []
 
@@ -350,6 +359,7 @@ class Jobs:
                 raise RuntimeError("ほかの作業が実行中です。終わってからもう一度どうぞ")
             if not job.session_id:
                 raise RuntimeError("この会話は続けられません")
+            job.target = grade_target(text) or job.target
             with job.cond:
                 job.status = "running"
                 job.add({"type": "user", "text": text})
@@ -374,10 +384,10 @@ class InboxJobs:
       ...
     """
 
-    MSG_RE = re.compile(r"^(\d{3})-(user|claude)\.md$")
+    MSG_RE = re.compile(r"^(\d{3,})-(user|claude)\.md$")
 
     def __init__(self):
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()  # 採点中の確認と保存・開始を同じロックでまとめるため、入れ子で取れるものにする
 
     @property
     def base(self):
@@ -425,17 +435,28 @@ class InboxJobs:
         return False  # 依頼は順番に並ぶので、いくつ置いてもよい
 
     def grading(self, qid):
-        return any(j["status"] == "running" and j.get("target") == qid for j in self.list())
+        # 一覧の上限より古い依頼も見る
+        return any(j["status"] == "running" and j.get("target") == qid for j in self._all())
 
-    def list(self):
+    def _all(self):
         if not self.base.is_dir():
             return []
         out = [self._read(d) for d in self.base.iterdir() if d.is_dir()]
         out = [o[0] for o in out if o]
-        return sorted(out, key=lambda j: j.get("created") or "", reverse=True)[:50]
+        return sorted(out, key=lambda j: j.get("created") or "", reverse=True)
+
+    def list(self):
+        return self._all()[:50]
+
+    @staticmethod
+    def _write_atomic(p, text):
+        # 書きかけのファイルを /inbox に拾われないよう、書き切ってから名前を付ける
+        tmp = p.with_name(p.name + ".tmp")
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, p)
 
     def _write_user(self, d, n, text):
-        (d / f"{n:03d}-user.md").write_text(INBOX_NOTE + "\n" + text.strip() + "\n", encoding="utf-8")
+        self._write_atomic(d / f"{n:03d}-user.md", INBOX_NOTE + "\n" + text.strip() + "\n")
 
     def start(self, prompt, title, target=None):
         with self.lock:
@@ -468,6 +489,11 @@ class InboxJobs:
                 raise LookupError("見つかりません")
             if r[0]["waiting"]:
                 raise RuntimeError("まだ前の依頼の返事が来ていません")
+            target = grade_target(text)
+            if target:
+                meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
+                meta["target"] = target
+                self._write_atomic(d / "meta.json", json.dumps(meta, ensure_ascii=False))
             self._write_user(d, r[0]["next"], text)
         return self._read(d)[0]
 
@@ -729,7 +755,10 @@ class Handler(BaseHTTPRequestHandler):
                 prompt, title, *target = build_prompt(body)
                 if body.get("action") != "setup" and profile_status() != "ok":
                     return self.error(409, "先に試験の設定をしてください")
-                job = self.jobs.start(prompt, title, *target)
+                with self.jobs.lock:
+                    if target and self.jobs.grading(target[0]):
+                        return self.error(409, "その問題はいま採点中です")
+                    job = self.jobs.start(prompt, title, *target)
                 return self.send_json({"job": job if isinstance(job, dict) else job.summary()})
             m = re.match(r"^/api/jobs/([0-9a-z-]+)/reply$", path)
             if m:
@@ -778,10 +807,11 @@ class Handler(BaseHTTPRequestHandler):
                 p = safe_child(VIEWABLE["answers"], qid + ".md")
                 if not p or not (VIEWABLE["questions"] / f"{qid}.md").is_file():
                     return self.error(404, "その問題はありません")
-                if self.jobs.grading(qid):
-                    return self.error(409, "採点中なので、いまは保存できません")
-                p.parent.mkdir(exist_ok=True)
-                p.write_text(text, encoding="utf-8")
+                with self.jobs.lock:  # 確認と保存の間に採点が始まらないように
+                    if self.jobs.grading(qid):
+                        return self.error(409, "採点中なので、いまは保存できません")
+                    p.parent.mkdir(exist_ok=True)
+                    p.write_text(text, encoding="utf-8")
                 return self.send_json({"ok": True})
         except Exception as e:
             return self.error(500, f"{type(e).__name__}: {e}")
