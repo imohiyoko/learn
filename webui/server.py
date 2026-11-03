@@ -130,15 +130,26 @@ def drill_default_count():
     return 10
 
 
-def recommend(log, n=3):
-    """stats.py --next と同じ推薦を [{tag, name, reason}] で返す。"""
+def recommend(kinds, n=3):
+    """問題バンクから route.py が次に選ぶ問題の分野を [{tag, name, reason}] で返す（出題と同じ選び方）。
+    バンクに問題がなければ空。"""
     tags = stats.load_tags(PROFILE)
     if not tags:
         return []
-    path, recent_n = LOGS[log]
-    history = stats.load_history(path)
-    agg, _ = stats.aggregate(tags, history, recent_n)
-    return [{"tag": t, "name": nm, "reason": r} for _, t, nm, r in stats.recommend(agg, history, n)]
+    try:
+        r = route.route(ROOT, n=10, kinds=kinds, pass_ratio=analyze.parse_pass_ratio(PROFILE))
+    except Exception:  # バンクの読み込みに失敗しても、画面の表示は止めない
+        return []
+    out, seen = [], set()
+    for it in r["items"]:
+        t = (it.get("tags") or [None])[0] or (it["concepts"][0].split("/")[0] if it.get("concepts") else None)
+        if not t or t in seen:
+            continue
+        seen.add(t)
+        out.append({"tag": t, "name": tags[t][0] if t in tags else t, "reason": it.get("reason") or ""})
+        if len(out) >= n:
+            break
+    return out
 
 
 def list_examples():
@@ -205,7 +216,7 @@ def state(jobs, runner):
         "exam": exam_name(),
         "tags": [{"tag": t, "name": n, "weight": w} for t, (n, w) in tags.items()],
         "examples": list_examples(),
-        "recommend": {"written": recommend("history"), "drill": recommend("drill")},
+        "recommend": {"written": recommend(("long",)), "drill": recommend(("choice",))},
         "drill_count": drill_default_count(),
         "runner": runner,
         "claude": runner == "loop" or bool(shutil.which(claude_bin())),
@@ -247,15 +258,6 @@ def build_prompt(body):
                 raise ValueError("過去問の id は past-<年度>-<問番号> の形です")
             return f"/question {past}", f"記述式 {past}"
         return f"/question {tag}".strip(), f"記述式 {tag or '（おまかせ）'}"
-    if action == "drill":
-        n = body.get("count")
-        args = [tag] if tag else []
-        if n not in (None, ""):
-            n = int(n)
-            if not 1 <= n <= 50:
-                raise ValueError("問題数は1〜50です")
-            args.append(str(n))
-        return " ".join(["/drill"] + args), f"択一 {tag or '（おまかせ）'}" + (f" {n}問" if n else "")
     if action == "grade":
         qid = str(body.get("id") or "").strip()
         if not ID_RE.match(qid) or qid.startswith("drill-"):
@@ -867,9 +869,14 @@ def bank_status():
             "unverified": len(st["unverified"]), "model": route.model(ROOT, pass_ratio=pr), "stock": st}
 
 
-def create_set(n=10, tag=None):
+SET_KINDS = {"mixed": ("choice", "short"), "choice": ("choice",)}  # 「今日のセット」と、択一だけのドリル
+
+
+def create_set(n=10, tag=None, kind="mixed"):
     if tag and not TAG_RE.match(tag):
         raise ValueError("タグの形式が正しくありません")
+    if kind not in SET_KINDS:
+        raise ValueError("セットの種類が正しくありません")
     if not 1 <= n <= 30:
         raise ValueError("問題数は1〜30です")
     # 解きかけのセットの問題は、新しいセットに入れない
@@ -877,7 +884,7 @@ def create_set(n=10, tag=None):
     for s in list_sets():
         if s["status"] == "open":
             busy.update(it["id"] for it in (load_set(s["id"]) or {}).get("items", []))
-    r = route.route(ROOT, n=n, kinds=("choice", "short"), tag=tag or None,
+    r = route.route(ROOT, n=n, kinds=SET_KINDS[kind], tag=tag or None,
                     pass_ratio=analyze.parse_pass_ratio(PROFILE), exclude=busy)
     if not r["items"]:
         raise RuntimeError("出せる問題がバンクにありません。「問題バンクを作る」で用意してください")
@@ -887,7 +894,7 @@ def create_set(n=10, tag=None):
         while (SETS / sid).exists():
             k += 1
             sid = f"{base}-{k}"
-        s = {"id": sid, "created": now_iso(), "tag": tag or None, "phase": r["phase"], "status": "open",
+        s = {"id": sid, "created": now_iso(), "tag": tag or None, "kind": kind, "want": n, "phase": r["phase"], "status": "open",
              "items": r["items"], "answers": {}, "results": {}, "shortage": r["shortage"]}
         save_set(s)
     return s
@@ -935,7 +942,7 @@ def set_view(s):
             if k:
                 v["key"] = {"answer": k["meta"].get("answer"), "body": k["body"]}
         items.append(v)
-    out = {k: s.get(k) for k in ("id", "created", "tag", "phase", "shortage")}
+    out = {k: s.get(k) for k in ("id", "created", "tag", "kind", "want", "phase", "shortage")}
     out.update({"status": status, "items": items})
     rp = REPORTS / f"{s['id']}.md"
     if rp.is_file():
@@ -1253,7 +1260,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/sets":
                 if profile_status() != "ok":
                     return self.error(409, "先に試験の設定をしてください")
-                return self.send_json({"set": set_view(create_set(int(body.get("n") or 10), str(body.get("tag") or "")))})
+                return self.send_json({"set": set_view(create_set(int(body.get("n") or 10), str(body.get("tag") or ""),
+                                                                  str(body.get("kind") or "mixed")))})
             m = re.match(r"^/api/sets/([^/]+)/answer$", path)
             if m:
                 s = answer_set_item(m.group(1), str(body.get("item") or ""), body.get("value"))

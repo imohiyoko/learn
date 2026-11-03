@@ -20,7 +20,8 @@ Claude Code で記述式問題の「出題 → 解答 → 採点 → 弱点更�
 - **採点基準は出題時に作って保存**するので、解答を見てから甘くなることがありません
 - **出題者・検証者・採点者を分けています**（`.claude/agents/`）。verifier は採点基準を見ずに解いて、問題の曖昧さを潰します
 - **ミスを3種類に分けて記録**します：`knowledge`（知らなかった）/ `reading`（本文を読み落とした）/ `writing`（書き方で落とした）
-- **択一ドリル**（`/drill`）で、午前・科目Aのような選択式の知識問題もまとめて回せます。記録は記述式と分けて集計します
+- **問題はその場で作らず、問題バンクから出します**。`/prepare` で好きなときに作り、verifier の確認を通した問題だけを、`scripts/route.py` が記録から選びます（在庫が足りなければ、ある分だけ出して知らせます）
+- **択一ドリル**（`/drill`）で、午前・科目Aのような選択式の知識問題もまとめて回せます。問題はバンクの択一です
 - **図や写真も扱えます**。問題の図は文字（表・Mermaid）か画像で、解答は手書きの写真やスクリーンショットでも採点できます
 
 ## はじめ方
@@ -74,7 +75,7 @@ claude                           # 別のターミナルで、このフォルダ
 
 ### B. サーバーが `claude -p` で処理する（API キーでも可）
 
-常駐の Claude Code を用意しないときは、サーバーが依頼ごとに `claude -p "/drill web 5"` を起動します。
+常駐の Claude Code を用意しないときは、サーバーが依頼ごとに `claude -p "/question web"` を起動します。
 
 ```bash
 python3 webui/server.py --runner cli
@@ -103,27 +104,27 @@ LEARN_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))") pyt
 
 ## 問題バンクとセット（苦手の洗い出しと穴埋め）
 
-毎回その場で問題を作って Claude が分野を選ぶ代わりに、問題を前もって用意しておき、次に何を解くかは `scripts/route.py` が記録から機械的に決めます。同じ記録からは同じセットになるので、「なぜこの問題が出たか」をいつでも説明できます。
+問題はその場では作りません。前もって用意しておき、次に何を解くかは `scripts/route.py` が記録から機械的に決めます。記述式（`/question`）も択一ドリル（`/drill`）も、出すのはバンクの問題だけです。同じ記録からは同じセットになるので、「なぜこの問題が出たか」をいつでも説明できます。
 
-1. **準備（`/prepare`）**：分野タグを「論点」に分けた一覧（`exam/concepts.md`）を作り、論点ごとに択一3問（易・中・難）と短い記述1問、分野ごとに本番形式の長文1問を、採点基準つき・verifier の確認つきで `bank/` に貯めます。1回で作る数には上限があり、`/loop` で回していれば少しずつ埋まります
+1. **準備（`/prepare`）**：分野タグを「論点」に分けた一覧（`exam/concepts.md`）を作り、論点ごとに択一3問（易・中・難）と短い記述1問、分野ごとに本番形式の長文1問を、採点基準つき・verifier の確認つきで `bank/` に貯めます。作るのは学習者が好きなときに（ホームの「問題バンクを作る」か `/prepare`）。1回で作る数には上限があるので、足りなければもう一度実行します。単語帳でまだ覚えていない言葉も、ここで択一にします
 2. **セット（ホームの「今日のセット」）**：route.py が10問前後を選びます
    - まだ測れていない論点が多いうちは**洗い出し**（測れていない論点を、分野の重みの大きい順に）
    - 測れてきたら**穴埋め**（苦手な論点に、正答率が65%前後になる難しさの問題を）。間違えた問題は 1・3・7日あけて**やり直し**、得意な論点もときどき**確認**します
    - 1つのセットで同じ論点は1問まで、1つの分野からは半分まで
 3. **解く**：1問ずつ表示します。択一は選択肢をクリックして「答える」と、その場で正誤と解説が出ます。短い記述は字数を数えながら書いて保存します
 4. **提出**：`/grade-set` が記述を採点し、問題ごとの解説、論点ごとの見込みの変化（前→後）、過去の記録と合わせた間違い方の傾向、次に埋める穴をレポート（`reports/<セット>.md`）に保存します。「履歴」の「セットとレポート」から見返せ、「間違えた問題だけ」に絞れます
-5. **長文**：ホームの「本番形式の長文を1問」は、バンクの長文から route.py が選んだものを `/question` で出します（なければその場で作ります）
+5. **長文**：ホームの「本番形式の長文を1問」は、バンクの長文から route.py が選んだものを `/question` で出します（なければ「バンクに長文がない」と知らせます）
 
 論点ごとの見込みは「成績」の「論点ごとの見込み」で見られます（`python3 scripts/route.py --model` と同じ）。バンクの択一・記述の結果は、分野ごとの判定（`scripts/analyze.py`）にも入ります。
 
-`/drill` の択一も、画面では1問ずつ選択肢をクリックして答え、最後に「答えを送る」でまとめて送れます。
+「択一ドリル」は、バンクの択一だけで同じようにセットを作ります（分野と問題数を選べます）。
 
 ## コマンド
 
 | コマンド | やること |
 |---|---|
-| `/question [タグ]` | 記述式を1問出題。タグ省略時は弱点から自動選択 |
-| `/drill [タグ] [問題数]` | 択一をまとめて出題し、その場で答え合わせ（`1ア 2ウ …` で回答） |
+| `/question [タグ]` | バンクの長文を1問出題。どれを出すかは route.py が決める |
+| `/drill [タグ] [問題数]` | バンクの択一をまとめて出題し、その場で答え合わせ（`1ア 2ウ …` で回答） |
 | `/grade [id]` | 採点・講評・記録・次の提案 |
 | `/review` | 得意・不得意な分野とその原因、ミスの傾向、次の3問 |
 | `/setup-exam` | 試験の設定・切り替え |
@@ -144,13 +145,9 @@ LEARN_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))") pyt
 
 ## 出題分野の選び方
 
-`scripts/stats.py --next` が次のルールで推薦します。
+出題もおすすめの分野も、`scripts/route.py` が論点ごとの見込みから決めます（上の「問題バンクとセット」の選び方）。分野の重みは `exam/profile.md` の分野タグ表、論点の重みは `exam/concepts.md` で調整できます。
 
-- まだ一度も出ていない分野は、重みの2倍の優先度にする（最初は全分野を一巡しやすい。ただし重みの差が大きいと既出の分野が先になることもある）
-- その後は「直近3回の平均点が低い × 分野の重み」が大きい順
-- 直前と同じ分野は優先度を下げる
-
-重みは `exam/profile.md` の分野タグ表で調整できます。択一ドリルも同じルールで分野を選びます（`--log drill`。直近は10問で見ます）。
+`scripts/stats.py --next` は、これまでの記録だけで分野を並べる簡単な推薦です（参考用）。
 
 ## 得意・不得意の分析
 
@@ -188,10 +185,10 @@ LEARN_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))") pyt
 |---|---|
 | 試験・形式・分野 | `exam/profile.md`（または `/setup-exam`） |
 | 採点の厳しさ | `exam/profile.md` の採点方針、`.claude/agents/grader.md` |
-| 問題の作り方 | `.claude/skills/question/SKILL.md`（択一は `.claude/skills/drill/SKILL.md`） |
+| 問題の作り方 | `.claude/skills/prepare/SKILL.md` |
 | 択一の選択肢の数・問題数 | `exam/profile.md` の「択一問題」 |
 | 結果の書式 | `templates/` |
-| 分野の推薦ロジック | `scripts/stats.py` |
+| 出題の選び方 | `scripts/route.py`（先頭の定数） |
 | 得意・不得意の判定 | `scripts/analyze.py`（先頭の定数） |
 
 新しい試験のプロファイルを作ったら、`examples/<略称>/profile.md` として残しておくと使い回せます。
@@ -202,7 +199,7 @@ LEARN_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))") pyt
 .
 ├ CLAUDE.md               # Claude への全体ルール
 ├ .claude/
-│  ├ skills/              # question / drill / grade / review / setup-exam / import-past / inbox
+│  ├ skills/              # question / drill / prepare / grade / grade-set / review / setup-exam / import-past / glossary / inbox
 │  └ agents/              # verifier（検証役）/ grader（採点役）
 ├ exam/profile.md         # 今の試験の設定（git管理外、/setup-exam で作成）
 ├ examples/               # 試験ごとの設定サンプル
@@ -216,7 +213,8 @@ LEARN_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))") pyt
 ├ questions/ rubrics/ answers/ results/
 ├ questions/assets/       # 問題の図（画像・SVG）
 ├ log/history.jsonl       # 記述式の成績
-├ log/drill.jsonl         # 択一ドリルの成績（1問1行）
+├ log/bank.jsonl          # 問題バンクの成績（1問1行。択一ドリルもここ）
+├ log/drill.jsonl         # 以前の択一ドリルの成績（いまは書かない。分析には入る）
 └ refs/                   # 公式資料（git管理外）
 ```
 
