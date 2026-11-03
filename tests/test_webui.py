@@ -211,6 +211,22 @@ class WebUITest(unittest.TestCase):
         self.assertNotIn("秘密", d("Bash", {"command": "echo a\n秘密"}))
         self.assertEqual(d("Write", {"file_path": str(server.ROOT / "rubrics" / "a.md"), "content": "秘密"}), "Write rubrics/a.md")
 
+    def test_06_port_fallback(self):
+        # 使っているポートを指定すると、次の空いている番号で起動する
+        busy = self.srv.server_address[1]
+        if busy >= 65535:
+            self.skipTest("末尾のポート")
+        with self.assertRaises(SystemExit):
+            server.make_server("127.0.0.1", busy, runner="cli").server_close()
+        try:
+            srv = server.make_server("127.0.0.1", busy, runner="cli", tries=20)
+        except SystemExit:
+            self.skipTest("近くのポートが埋まっている")
+        try:
+            self.assertGreater(srv.server_address[1], busy)
+        finally:
+            srv.server_close()
+
     def test_04_token(self):
         with self.assertRaises(SystemExit):
             server.make_server("0.0.0.0", 0)
@@ -221,7 +237,7 @@ class WebUITest(unittest.TestCase):
             with self.assertRaises(urllib.error.HTTPError) as cm:
                 urllib.request.urlopen(base + "/api/state")
             self.assertEqual(cm.exception.code, 401)
-            req = urllib.request.Request(base + "/api/state", headers={"Cookie": "learn_token=secret"})
+            req = urllib.request.Request(base + "/api/state", headers={"Cookie": f"learn_token_{server.hashlib.sha256(b'secret').hexdigest()[:12]}=secret"})
             with urllib.request.urlopen(req) as r:
                 self.assertEqual(r.status, 200)
         finally:

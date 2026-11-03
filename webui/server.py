@@ -11,7 +11,7 @@
                          （常駐の Claude Code を用意しないとき。API キーでも動く）
 
 使い方:
-  python3 webui/server.py                 http://127.0.0.1:8765 で起動
+  python3 webui/server.py                 http://127.0.0.1:4870 で起動（使用中なら 4871, 4872, ... を試す）
   python3 webui/server.py --port 9000
   python3 webui/server.py --runner cli    claude -p で処理する
   LEARN_TOKEN=xxxx python3 webui/server.py --host 0.0.0.0
@@ -23,6 +23,8 @@
   LEARN_CLAUDE_ARGS  claude に渡す追加の引数（例：--model sonnet）
 """
 import argparse
+import errno
+import hashlib
 import hmac
 import json
 import os
@@ -658,11 +660,16 @@ class Handler(BaseHTTPRequestHandler):
         host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]")
         return host in self.allowed_hosts
 
+    def cookie_name(self):
+        # Cookie はポートを区別しないので、同じ PC で別のトークンのサーバーを並べても混ざらないよう名前を分ける
+        return "learn_token_" + hashlib.sha256(self.token.encode()).hexdigest()[:12]
+
     def authed(self):
         if not self.token:
             return True
         cookie = SimpleCookie(self.headers.get("Cookie") or "")
-        given = cookie["learn_token"].value if "learn_token" in cookie else ""
+        name = self.cookie_name()
+        given = cookie[name].value if name in cookie else ""
         given = self.headers.get("X-Learn-Token") or given
         return hmac.compare_digest(given, self.token)
 
@@ -694,7 +701,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.token and "token" in q and hmac.compare_digest(q["token"], self.token) and self.host_ok():
             self.send_response(HTTPStatus.SEE_OTHER)
-            self.send_header("Set-Cookie", f"learn_token={self.token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000")
+            self.send_header("Set-Cookie", f"{self.cookie_name()}={self.token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000")
             self.send_header("Location", path)
             self.end_headers()
             return
@@ -826,13 +833,21 @@ RUNNERS = {"loop": InboxJobs, "cli": Jobs}
 
 class Server(ThreadingHTTPServer):
     daemon_threads = True
+    # Windows の SO_REUSEADDR は使用中のポートにも重ねて bind できてしまい、空きを確かめられないので使わない
+    allow_reuse_address = os.name != "nt"
 
 
 class Server6(Server):
     address_family = socket.AF_INET6
 
 
-def make_server(host="127.0.0.1", port=8765, token=None, runner="loop"):
+DEFAULT_PORT = 4870
+PORT_TRIES = 20  # 使用中なら次の番号を順に試す数
+
+
+def make_server(host="127.0.0.1", port=DEFAULT_PORT, token=None, runner="loop", tries=1):
+    if not 0 <= port <= 65535:
+        raise SystemExit("--port は 0〜65535 で指定してください（1024〜49151 が無難）")
     if runner not in RUNNERS:
         raise SystemExit(f"--runner は {' / '.join(RUNNERS)} のどれかです")
     if host not in LOOPBACK and not token:
@@ -846,20 +861,34 @@ def make_server(host="127.0.0.1", port=8765, token=None, runner="loop"):
         "allowed_hosts": LOOPBACK if (host in LOOPBACK or not token) else None,
     })
     cls = Server6 if ":" in host else Server
-    return cls((host, port), handler)
+    for p in range(port, min(port + max(tries, 1), 65536)):
+        try:
+            return cls((host, p), handler)
+        except OSError as e:
+            # 使用中（EADDRINUSE / Windows の WSAEADDRINUSE・WSAEACCES）なら次の番号へ。
+            # Windows 以外の EACCES は権限不足（1023 以下のポートなど）なので、そのまま止める
+            in_use = e.errno in (errno.EADDRINUSE, 10048) or (os.name == "nt" and e.errno in (errno.EACCES, 10013))
+            if not in_use or port == 0:
+                raise
+            last = e
+    raise SystemExit(f"ポート {port}〜{p} はすべて使用中です。--port で別の番号を指定してください（{last}）")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--host", default=os.environ.get("LEARN_HOST", "127.0.0.1"))
-    ap.add_argument("--port", type=int, default=int(os.environ.get("LEARN_PORT", "8765")))
+    ap.add_argument("--port", type=int, default=int(os.environ.get("LEARN_PORT", DEFAULT_PORT)),
+                    help=f"待ち受けるポート（既定：{DEFAULT_PORT}）。使用中なら次の番号を順に試す")
     ap.add_argument("--runner", choices=sorted(RUNNERS), default=os.environ.get("LEARN_RUNNER", "loop"),
                     help="loop：依頼を inbox/ に置き、常駐している Claude Code（/loop 1m /inbox）に処理させる（既定）。"
                          "cli：このサーバーが claude -p を起動して処理する")
     args = ap.parse_args()
-    srv = make_server(args.host, args.port, os.environ.get("LEARN_TOKEN"), args.runner)
+    srv = make_server(args.host, args.port, os.environ.get("LEARN_TOKEN"), args.runner, tries=PORT_TRIES)
+    port = srv.server_address[1]
+    if port != args.port and args.port:
+        print(f"ポート {args.port} は使用中なので {port} で起動します")
     shown = "127.0.0.1" if args.host in ("0.0.0.0", "::") else args.host
-    print(f"learn web UI: http://{shown}:{args.port}/" + ("?token=..." if os.environ.get("LEARN_TOKEN") else ""))
+    print(f"learn web UI: http://{shown}:{port}/" + ("?token=..." if os.environ.get("LEARN_TOKEN") else ""))
     if args.runner == "loop":
         print("依頼は inbox/ に置きます。このフォルダで Claude Code を起動し、`/loop 1m /inbox` で処理してください")
     elif not shutil.which(claude_bin()):
