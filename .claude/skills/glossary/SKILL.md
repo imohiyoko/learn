@@ -5,7 +5,7 @@ description: 単語帳（log/glossary.jsonl）に言葉の意味を書き足す�
 
 # 単語帳の意味を作る
 
-引数：任意で言葉を「、」区切りで（例：`/glossary DMARC、SPF`）。
+引数：任意で言葉を「、」区切りで（例：`/glossary 言葉A、言葉B`）。
 
 ## 手順
 

@@ -1,9 +1,12 @@
 # 雛形だけを共有する。学習データ・個人設定は push しない。
 # （フォルダを残すため .gitkeep だけは追跡する）
 
-# 個人の試験プロファイル（雛形は templates/profile.md、サンプルは examples/）
+# 個人の試験プロファイル（雛形は templates/profile.md）と、前に作ったプロファイルの控え
+# リポジトリには試験の中身を入れない
 exam/*
 !exam/.gitkeep
+examples/*
+!examples/.gitkeep
 
 # 学習の記録
 questions/*

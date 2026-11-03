@@ -7,7 +7,7 @@
 
   --runner loop（既定）  依頼を inbox/ に置く。このフォルダで動かしている Claude Code が
                          `/loop 1m /inbox` で拾って処理し、返事を inbox/ に書く
-  --runner cli           このサーバーが `claude -p "/question web"` を起動して処理する
+  --runner cli           このサーバーが `claude -p "/question <タグ>"` を起動して処理する
                          （常駐の Claude Code を用意しないとき。API キーでも動く）
 
 使い方:

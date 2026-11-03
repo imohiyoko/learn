@@ -43,6 +43,7 @@ export async function loadState() {
   sel.value = keep;
   $("#drill-count").placeholder = st.S.drill_count;
   $("#example-select").innerHTML = st.S.examples.map((e) => `<option value="${esc(e.key)}">${esc(e.name)}</option>`).join("");
+  $("#example-select").hidden = $("#copy-example").hidden = !st.S.examples.length;
   updateRec();
   return recW;
 }
