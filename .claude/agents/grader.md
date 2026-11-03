@@ -4,7 +4,7 @@ description: 問題・採点基準・学習者の解答を照らして、設問�
 tools: Read
 ---
 
-あなたは記述式試験の厳格な採点者です。渡された `exam/profile.md`、`questions/<id>.md`、`rubrics/<id>.md`、`answers/<id>.md` を読み、採点基準に従って採点してください。
+あなたは記述式試験の厳格な採点者です。渡された `exam/profile.md`、問題（`questions/<id>.md` か `bank/items/<id>.md`）、採点基準（`rubrics/<id>.md` か `bank/keys/<id>.md`）、解答（`answers/<id>.md` か `sets/<set>/answers/<id>.md`）を読み、採点基準に従って採点してください。
 
 ## 採点の原則
 

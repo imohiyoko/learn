@@ -11,7 +11,7 @@ description: ブラウザの画面（webui/）から inbox/ に置かれた依�
 
 ```
 inbox/<job>/meta.json        {"title": 画面での名前, "created": ..., "target": 採点対象の id（採点のときだけ）}
-inbox/<job>/000-user.md      最初の依頼。本文はスラッシュコマンド（/question web、/drill auth 5、/grade <id>、/review、/import-past r06a q1、/setup-exam）
+inbox/<job>/000-user.md      最初の依頼。本文はスラッシュコマンド（/question web、/drill auth 5、/grade <id>、/grade-set <set>、/prepare web、/review、/import-past r06a q1、/setup-exam）
 inbox/<job>/000-claude.md    あなたの返事（これを書くと「処理済み」になる）
 inbox/<job>/001-user.md      学習者の返信（択一の「1ア 2ウ …」、setup-exam の質問への答えなど）
 inbox/<job>/001-claude.md    その返事
@@ -24,7 +24,7 @@ inbox/<job>/001-claude.md    その返事
 1. `ls inbox/*/*-user.md 2>/dev/null` で依頼を一覧し、**同じ番号の `NNN-claude.md` がないもの**を、`<job>` 名（＝作成時刻）の古い順に処理する。なければ「新しい依頼はありません」とだけ言って終わる（ほかのファイルは読まない）
 2. 依頼ごとに：
    - 同じ `<job>` の、それより前の `NNN-user.md` と `NNN-claude.md` を読み、会話の流れをつかむ
-   - 本文がスラッシュコマンドなら、そのスキル（question / drill / grade / review / import-past / setup-exam）の手順どおりに実行する。引数もそのまま使う
+   - 本文がスラッシュコマンドなら、そのスキル（question / drill / grade / grade-set / prepare / glossary / review / import-past / setup-exam）の手順どおりに実行する。引数もそのまま使う
    - 本文が `【解答中の質問】<id> [設問N(n)]` で始まるなら、学習者が解答を書いている途中の質問。採点はしない。`questions/<id>.md` を読み、「種類」に応じて短く返す（`rubrics/` は読まない）：
      - 言葉の意味：その言葉の一般的な意味を2〜3文で。この問題での当てはめや、解答に使えるかどうかには触れない。答えた言葉は `templates/glossary-line.json` の形で `log/glossary.jsonl` に1語1行で追記する（`source: "ask"`、`from` はその問題の id、`tags` はその問題の `tags`）。学習者の単語帳になる
      - 何を聞かれているか：設問文を言い換え、答える対象と形式（理由を書く／字句を抜き出す／2つ書く など）だけを示す
@@ -43,7 +43,7 @@ inbox/<job>/001-claude.md    その返事
    （学習者への返事。Markdown）
    ```
 
-   - 出題したら `questions:` に `<id>` を入れる。ブラウザが `questions/<id>.md` を表示し、記述式なら解答欄（`answers/<id>.md`）も出すので、本文に問題文を貼る必要はない。要点と「解答欄に書いて『保存して採点する』を押してください」（択一なら「返信欄に `1ア 2ウ …` で答えてください」）だけでよい
+   - 出題したら `questions:` に `<id>` を入れる。ブラウザが `questions/<id>.md` を表示し、記述式なら解答欄（`answers/<id>.md`）も出すので、本文に問題文を貼る必要はない。要点と「解答欄に書いて『保存して採点する』を押してください」（択一なら「選択肢をクリックして『答えを送る』を押してください」。画面が `1ア 2ウ …` の形にまとめて返信してくる）だけでよい
    - 採点したら、合計点・合格ラインとの差・弱点・次のおすすめを書く。講評の全文は `results/<id>.md` にあり、ブラウザが表示する
    - 質問するときは1つずつ短く。学習者は返信欄で答える
    - **採点基準（`rubrics/`）や verifier の解答を、採点が終わる前に返事に書かない**

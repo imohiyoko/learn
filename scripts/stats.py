@@ -22,6 +22,8 @@ LOGS = {
     # 名前: (ファイル, 「直近」とみなす件数)。択一は1問ごとの記録なので多めに見る
     "history": (ROOT / "log" / "history.jsonl", 3),
     "drill": (ROOT / "log" / "drill.jsonl", 10),
+    # 問題バンク（scripts/route.py が選ぶセット）の成績。択一と短い記述が混ざる
+    "bank": (ROOT / "log" / "bank.jsonl", 10),
 }
 HISTORY, RECENT_N = LOGS["history"]
 

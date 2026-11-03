@@ -26,6 +26,20 @@
 
   <!-- ホーム：いまの資格・続き・分野・資格の切り替え -->
   <section id="tab-home" class="tab">
+    <div class="card" id="home-set">
+      <div class="card-head">
+        <h2>今日のセット</h2>
+        <span id="home-set-meta" class="muted small"></span>
+      </div>
+      <p id="home-set-text" class="small"></p>
+      <div class="row">
+        <button class="primary" id="home-set-start" type="button" hidden>セットを始める（10問）</button>
+        <button id="home-long" data-start="question" type="button" hidden>本番形式の長文を1問</button>
+        <button id="home-prepare" type="button" hidden>問題バンクを作る</button>
+      </div>
+      <div id="home-set-open"></div>
+    </div>
+
     <div class="card">
       <div class="card-head">
         <h2 id="home-exam-name">いまの資格</h2>
@@ -91,6 +105,48 @@
       <p id="rec" class="muted small"></p>
       <button type="submit" class="primary" id="start-btn">はじめる</button>
     </form>
+
+    <!-- セット：route.py が選んだ問題を1問ずつ -->
+    <div class="card" id="set-card" hidden>
+      <div class="card-head">
+        <h2 id="set-title"></h2>
+        <span id="set-meta" class="muted small"></span>
+      </div>
+      <div id="set-dots" class="set-dots"></div>
+      <div id="set-item">
+        <div id="set-reason" class="muted small"></div>
+        <div id="set-body" class="md"></div>
+        <div id="set-options" class="options"></div>
+        <div id="set-short" hidden>
+          <textarea id="set-short-text" rows="3" aria-label="解答"></textarea>
+          <div id="set-short-count" class="ans-count"></div>
+        </div>
+        <div id="set-feedback" class="feedback md" hidden></div>
+        <div class="row">
+          <button id="set-prev" type="button">前へ</button>
+          <button id="set-answer" class="primary" type="button">答える</button>
+          <button id="set-next" type="button">次へ</button>
+          <span id="set-status" class="muted small"></span>
+        </div>
+      </div>
+      <div id="set-finish" hidden>
+        <p id="set-finish-text"></p>
+        <div class="row">
+          <button id="set-submit" class="primary" type="button">提出して、採点と解説のレポートを作る</button>
+          <button id="set-back" type="button">見直す</button>
+          <button id="set-regrade" type="button" hidden>採点をやり直す</button>
+        </div>
+      </div>
+      <div id="set-report" hidden>
+        <div class="row">
+          <label class="small"><input type="checkbox" id="set-wrong-only"> 間違えた問題だけ</label>
+        </div>
+        <div id="set-review"></div>
+        <h3>レポート</h3>
+        <div id="set-compare"></div>
+        <div id="set-report-body" class="md"></div>
+      </div>
+    </div>
 
     <div id="work" hidden>
       <div class="card" id="question-card" hidden>
@@ -246,11 +302,21 @@
   <!-- 成績 -->
   <section id="tab-stats" class="tab" hidden>
     <div class="card"><div id="stats-body"></div></div>
+    <div class="card">
+      <h2>論点ごとの見込み</h2>
+      <p class="muted small">問題バンクのセットと長文の結果から。次のセットはこれをもとに機械的に選ばれます。</p>
+      <div id="concepts-body"></div>
+    </div>
   </section>
 
   <!-- 履歴 -->
   <section id="tab-history" class="tab" hidden>
     <div class="card">
+      <h2>セットとレポート</h2>
+      <table class="list"><thead><tr><th>セット</th><th>段階</th><th>結果</th><th>状態</th></tr></thead><tbody id="sets-list"></tbody></table>
+    </div>
+    <div class="card">
+      <h2>問題</h2>
       <table class="list"><thead><tr><th>問題</th><th>種類</th><th>分野</th><th>結果</th></tr></thead><tbody id="items"></tbody></table>
     </div>
     <div class="card" id="viewer" hidden>

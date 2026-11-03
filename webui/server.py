@@ -38,6 +38,7 @@ import threading
 import time
 import unicodedata
 import uuid
+from collections import Counter
 from datetime import datetime
 from http import HTTPStatus
 from http.cookies import SimpleCookie
@@ -50,6 +51,7 @@ STATIC = Path(__file__).resolve().parent / "static"
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import analyze  # noqa: E402
+import route  # noqa: E402
 import stats  # noqa: E402
 
 TAG_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
@@ -72,6 +74,10 @@ def configure(root):
     LOGS = {name: (ROOT / "log" / path.name, n) for name, (path, n) in stats.LOGS.items()}
     # ブラウザから読めるファイル。rubrics/ は採点前に見せない約束なので出さない
     VIEWABLE = {k: ROOT / k for k in ("questions", "results", "answers")}
+    # 問題バンク（bank/keys は正解と採点基準なので、そのままは見せない）・セット・レポート
+    global BANK_ITEMS, BANK_KEYS, SETS, REPORTS
+    BANK_ITEMS, BANK_KEYS = ROOT / "bank" / "items", ROOT / "bank" / "keys"
+    SETS, REPORTS = ROOT / "sets", ROOT / "reports"
 
 
 configure(ROOT)
@@ -81,8 +87,8 @@ configure(ROOT)
 # 承認するのはこのフォルダの中の編集だけなので、外への書き込みは断られる。
 ALLOWED_TOOLS = [
     "Read", "Glob", "Grep", "Task", "Agent", "WebSearch", "WebFetch",
-    "Bash(python3 scripts/stats.py:*)", "Bash(python3 scripts/analyze.py:*)",
-    "Bash(python scripts/stats.py:*)", "Bash(python scripts/analyze.py:*)",
+    "Bash(python3 scripts/stats.py:*)", "Bash(python3 scripts/analyze.py:*)", "Bash(python3 scripts/route.py:*)",
+    "Bash(python scripts/stats.py:*)", "Bash(python scripts/analyze.py:*)", "Bash(python scripts/route.py:*)",
     "Bash(date:*)", "Bash(mkdir:*)", "Bash(ls:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)",
     "Bash(pdftoppm:*)", "Bash(pdfinfo:*)",
 ]
@@ -211,7 +217,7 @@ def analysis():
     tags = stats.load_tags(PROFILE)
     if not tags:
         return None
-    a = analyze.analyze(tags, analyze.load_rows(LOGS["history"][0], LOGS["drill"][0]), analyze.parse_pass_ratio(PROFILE),
+    a = analyze.analyze(tags, analyze.load_rows(LOGS["history"][0], LOGS["drill"][0], LOGS["bank"][0]), analyze.parse_pass_ratio(PROFILE),
                         asks=analyze.load_asks(ASKS))
     # 画面用に、analyze.py が文字の表示に使うラベルを添える
     for t in a["tags"].values():
@@ -268,6 +274,20 @@ def build_prompt(body):
         if len(terms) > 10 or any(len(s) > 40 or s.startswith("/") or re.search(r"[\x00-\x1f\x7f]", s) for s in terms):
             raise ValueError("言葉は1つ40字以内、10語までです")
         return " ".join(["/glossary", "、".join(terms)]).strip(), "単語帳" + (f" {'、'.join(terms)}" if terms else "")
+    if action == "grade-set":
+        sid = str(body.get("id") or "").strip()
+        if not SET_RE.match(sid):
+            raise ValueError("セットの id が正しくありません")
+        return f"/grade-set {sid}", f"セットの採点 {sid}", sid
+    if action == "prepare":
+        args = [tag] if tag else []
+        n = body.get("count")
+        if n not in (None, ""):
+            n = int(n)
+            if not 1 <= n <= 40:
+                raise ValueError("作る問題数は1〜40です")
+            args.append(str(n))
+        return " ".join(["/prepare"] + args), "問題バンクの準備" + (f" {tag}" if tag else "")
     if action == "setup":
         # 勉強したい資格の名前（任意）。1行の短い名前だけ受け付ける
         exam = str(body.get("exam") or "").strip()
@@ -774,6 +794,208 @@ def update_term_state(key, body):
     return s
 
 
+# ---------------------------------------------------------------- 問題バンクとセット
+# セットは scripts/route.py が選んだ問題の組。択一は答えたその場でサーバーが採点し（正解キーと照らすだけ）、
+# 短い記述は提出後に /grade-set（Claude）が採点して、解説と分析のレポートを reports/<set>.md に書く。
+
+SET_RE = re.compile(r"^set-\d{8}-\d{6}(-\d+)?$")
+CHOICE_RE = re.compile(r"^\s*[-*]\s*([ア-ンA-Z])[\s　.．:：)）]\s*(.+)$")
+SET_LOCK = threading.RLock()
+
+
+def bank_item(iid):
+    """問題の本文と選択肢。正解キーは含めない"""
+    p = safe_child(BANK_ITEMS, iid + ".md")
+    if not p or not p.is_file():
+        return None
+    text = p.read_text(encoding="utf-8")
+    meta = route.front_matter(text)
+    body = route.body_of(text)
+    options, lines = [], []
+    for line in body.splitlines():
+        m = CHOICE_RE.match(line) if meta.get("kind") == "choice" else None
+        if m:
+            options.append({"label": m.group(1), "text": m.group(2).strip()})
+        else:
+            lines.append(line)
+    return {"id": iid, "kind": meta.get("kind"), "tags": route.parse_list(meta.get("tags")),
+            "concepts": route.parse_list(meta.get("concepts")), "difficulty": meta.get("difficulty"),
+            "time_min": meta.get("time_min"), "body": "\n".join(lines).strip(), "options": options}
+
+
+def bank_key(iid):
+    p = safe_child(BANK_KEYS, iid + ".md")
+    if not p or not p.is_file():
+        return None
+    text = p.read_text(encoding="utf-8")
+    return {"meta": route.front_matter(text), "body": route.body_of(text)}
+
+
+def set_dir(sid):
+    return safe_child(SETS, sid) if SET_RE.match(sid or "") else None
+
+
+def load_set(sid):
+    d = set_dir(sid)
+    try:
+        return json.loads((d / "set.json").read_text(encoding="utf-8")) if d else None
+    except (OSError, ValueError):
+        return None
+
+
+def save_set(s):
+    d = SETS / s["id"]
+    d.mkdir(parents=True, exist_ok=True)
+    tmp = d / "set.json.tmp"
+    tmp.write_text(json.dumps(s, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, d / "set.json")
+
+
+def concept_names():
+    return {c: v["name"] for c, v in route.load_concepts(route.paths(ROOT)).items()}
+
+
+def bank_status():
+    p = route.paths(ROOT)
+    if not route.load_concepts(p):
+        return {"ready": False, "concepts": 0, "items": 0}
+    st = route.stock(ROOT)
+    items = route.load_items(p)
+    pr = analyze.parse_pass_ratio(PROFILE)
+    return {"ready": bool(items), "concepts": len(st["concepts"]), "items": len(items),
+            "kinds": dict(Counter(v["kind"] for v in items.values())), "need": st["total_need"],
+            "unverified": len(st["unverified"]), "model": route.model(ROOT, pass_ratio=pr), "stock": st}
+
+
+def create_set(n=10, tag=None):
+    if tag and not TAG_RE.match(tag):
+        raise ValueError("タグの形式が正しくありません")
+    if not 1 <= n <= 30:
+        raise ValueError("問題数は1〜30です")
+    # 解きかけのセットの問題は、新しいセットに入れない
+    busy = set()
+    for s in list_sets():
+        if s["status"] == "open":
+            busy.update(it["id"] for it in (load_set(s["id"]) or {}).get("items", []))
+    r = route.route(ROOT, n=n, kinds=("choice", "short"), tag=tag or None,
+                    pass_ratio=analyze.parse_pass_ratio(PROFILE), exclude=busy)
+    if not r["items"]:
+        raise RuntimeError("出せる問題がバンクにありません。「問題バンクを作る」で用意してください")
+    with SET_LOCK:
+        base = "set-" + datetime.now().strftime("%Y%m%d-%H%M%S")
+        sid, k = base, 1
+        while (SETS / sid).exists():
+            k += 1
+            sid = f"{base}-{k}"
+        s = {"id": sid, "created": now_iso(), "tag": tag or None, "phase": r["phase"], "status": "open",
+             "items": r["items"], "answers": {}, "results": {}, "shortage": r["shortage"]}
+        save_set(s)
+    return s
+
+
+def list_sets():
+    if not SETS.is_dir():
+        return []
+    out = []
+    for d in SETS.iterdir():
+        s = load_set(d.name) if SET_RE.match(d.name) else None
+        if not s:
+            continue
+        res = s.get("results", {})
+        out.append({"id": s["id"], "created": s.get("created"), "status": set_status(s), "phase": s.get("phase"),
+                    "n": len(s["items"]), "answered": len(s.get("answers", {})),
+                    "correct": sum(1 for r in res.values() if r.get("correct")),
+                    "choices": sum(1 for it in s["items"] if it["kind"] == "choice"),
+                    "report": (REPORTS / f"{s['id']}.md").is_file()})
+    return sorted(out, key=lambda x: x["id"], reverse=True)
+
+
+def set_status(s):
+    if (REPORTS / f"{s['id']}.md").is_file():
+        return "graded"
+    return s.get("status", "open")
+
+
+def set_view(s):
+    """画面に出すセット。正解と解説は、答えた択一と、採点の終わった記述にだけ付ける"""
+    status = set_status(s)
+    names = concept_names()
+    results = dict(s.get("results", {}))
+    if status == "graded":  # 記述の点数は /grade-set が log/bank.jsonl に書いたもの
+        for r in read_jsonl(LOGS["bank"][0]):
+            if r.get("set") == s["id"] and r.get("kind") == "short" and stats.is_num(r.get("score")) and stats.is_num(r.get("max")) and r["max"] > 0:
+                results[r.get("item")] = {"score": r["score"], "max": r["max"], "correct": r["score"] >= r["max"] * 0.6}
+    items = []
+    for it in s["items"]:
+        b = bank_item(it["id"]) or {"id": it["id"], "body": "（問題が見つかりません）", "options": []}
+        v = {**it, "body": b["body"], "options": b["options"], "concept_names": [names.get(c, c) for c in it["concepts"]],
+             "answer": s.get("answers", {}).get(it["id"]), "result": results.get(it["id"])}
+        if (it["kind"] == "choice" and v["result"]) or status == "graded":
+            k = bank_key(it["id"])
+            if k:
+                v["key"] = {"answer": k["meta"].get("answer"), "body": k["body"]}
+        items.append(v)
+    out = {k: s.get(k) for k in ("id", "created", "tag", "phase", "shortage")}
+    out.update({"status": status, "items": items})
+    rp = REPORTS / f"{s['id']}.md"
+    if rp.is_file():
+        out["report"] = rp.read_text(encoding="utf-8")
+        out["compare"] = route.compare(s["id"], ROOT, pass_ratio=analyze.parse_pass_ratio(PROFILE))
+    return out
+
+
+def answer_set_item(sid, iid, value):
+    with SET_LOCK:
+        s = load_set(sid)
+        if not s:
+            raise LookupError("そのセットはありません")
+        if set_status(s) != "open":
+            raise RuntimeError("提出済みのセットです")
+        it = next((x for x in s["items"] if x["id"] == iid), None)
+        if not it:
+            raise LookupError("その問題はこのセットにありません")
+        value = str(value or "").strip()
+        if it["kind"] == "choice":
+            if iid in s["results"]:
+                raise RuntimeError("この問題はもう答えています")
+            b, k = bank_item(iid), bank_key(iid)
+            if not k or not b:
+                raise LookupError("正解キーがありません")
+            if value not in {o["label"] for o in b["options"]}:
+                raise ValueError("選択肢から選んでください")
+            correct = value == k["meta"].get("answer", "").strip()
+            names = concept_names()
+            append_jsonl(LOGS["bank"][0], {
+                "id": f"{sid}-{iid}", "set": sid, "item": iid, "kind": "choice", "tags": it["tags"] or ["unknown"],
+                "concepts": it["concepts"], "difficulty": it["difficulty"], "score": 1 if correct else 0, "max": 1,
+                "answer": value, "graded_at": now_iso(),
+                "weak": [] if correct else [names.get(c, c) for c in it["concepts"][:1]], "miss_type": {}})
+            s["answers"][iid] = value
+            s["results"][iid] = {"correct": correct, "graded_at": now_iso()}
+        else:
+            if len(value) > 4000:
+                raise ValueError("解答が長すぎます")
+            s["answers"][iid] = value
+            d = SETS / sid / "answers"
+            d.mkdir(parents=True, exist_ok=True)
+            (d / f"{iid}.md").write_text(value + "\n", encoding="utf-8")
+        save_set(s)
+        return s
+
+
+def submit_set(sid):
+    with SET_LOCK:
+        s = load_set(sid)
+        if not s:
+            raise LookupError("そのセットはありません")
+        if set_status(s) != "open":
+            raise RuntimeError("提出済みのセットです")
+        s["status"] = "submitted"
+        s["submitted_at"] = now_iso()
+        save_set(s)
+        return s
+
+
 # ---------------------------------------------------------------- 資料（refs/）のアップロード
 
 REF_EXTS = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".txt", ".md"}
@@ -969,6 +1191,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"refs": list_refs(), "dirs": list(REF_DIRS)})
             if path == "/api/glossary":
                 return self.send_json(glossary())
+            if path == "/api/bank":
+                return self.send_json(bank_status())
+            if path == "/api/sets":
+                return self.send_json({"sets": list_sets()})
+            m = re.match(r"^/api/sets/([^/]+)$", path)
+            if m:
+                s = load_set(m.group(1))
+                return self.send_json({"set": set_view(s)}) if s else self.error(404, "そのセットはありません")
             m = re.match(r"^/api/jobs/([0-9a-z-]+)$", path)
             if m:
                 r = self.jobs.events(m.group(1), int(q.get("after", 0)), min(float(q.get("wait", 0) or 0), 30))
@@ -1020,6 +1250,28 @@ class Handler(BaseHTTPRequestHandler):
                     record_ask(qid, part, kind, text)
                     job = self.jobs.reply(jid, ask_message(qid, part, kind, text))
                 return self.send_json({"job": job})
+            if path == "/api/sets":
+                if profile_status() != "ok":
+                    return self.error(409, "先に試験の設定をしてください")
+                return self.send_json({"set": set_view(create_set(int(body.get("n") or 10), str(body.get("tag") or "")))})
+            m = re.match(r"^/api/sets/([^/]+)/answer$", path)
+            if m:
+                s = answer_set_item(m.group(1), str(body.get("item") or ""), body.get("value"))
+                return self.send_json({"set": set_view(s)})
+            m = re.match(r"^/api/sets/([^/]+)/submit$", path)
+            if m:
+                sid = m.group(1)
+                with self.jobs.lock:
+                    if self.jobs.grading(sid):
+                        return self.error(409, "このセットはいま採点中です")
+                    s = submit_set(sid)
+                    try:
+                        job = self.jobs.start(f"/grade-set {sid}", f"セットの採点 {sid}", sid)
+                    except RuntimeError:
+                        s["status"] = "open"  # Claude が別の作業中。提出は取り消して、あとでもう一度
+                        save_set(s)
+                        raise
+                return self.send_json({"set": set_view(s), "job": job if isinstance(job, dict) else job.summary()})
             if path == "/api/glossary":
                 add_term(body.get("term"), body.get("meaning"), body.get("tags"))
                 return self.send_json({"ok": True})

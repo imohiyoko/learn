@@ -41,6 +41,11 @@ elif prompt.startswith("/grade "):
     Path("results").mkdir(exist_ok=True)
     (Path("results") / f"{gid}.md").write_text("# 採点結果\n\n| 設問 | 得点 |\n|---|---|\n| 1 | 60 |\n", encoding="utf-8")
     content.append({"type": "text", "text": "60点でした。"})
+elif prompt.startswith("/grade-set "):
+    sid = prompt.split()[1]
+    Path("reports").mkdir(exist_ok=True)
+    (Path("reports") / f"{sid}.md").write_text("# レポート\n\n解説です。\n", encoding="utf-8")
+    content.append({"type": "text", "text": "レポートを書きました。"})
 else:
     content.append({"type": "text", "text": f"受け取りました：{prompt}" + (f"（{resume} の続き）" if resume else "")})
 if prompt.startswith("/question"):
