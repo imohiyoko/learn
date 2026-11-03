@@ -43,24 +43,41 @@ Claude Code で記述式問題の「出題 → 解答 → 採点 → 弱点更�
 
 ## ブラウザから使う（セルフホスト）
 
-ターミナルを開かずに、ブラウザで学習の種類・分野・問題数を選んで回せます。自分の PC で動かすだけで、アカウント登録やデータベースは要りません。
-
-```bash
-python3 webui/server.py      # → http://127.0.0.1:8765/
-```
+ターミナルで操作する代わりに、ブラウザで学習の種類・分野・問題数を選んで回せます。自分の PC で動かすだけで、アカウント登録やデータベースは要りません。
 
 - **学習する**：記述式 / 択一ドリル / 取り込んだ過去問 / 過去問の取り込み / 振り返り を選び、分野（おまかせ＝弱点から自動）と問題数を指定して「はじめる」。問題は画面に表示され、記述式は解答欄に書いて「保存して採点する」、択一は返信欄に `1ア 2ウ …` で答えます
 - **成績**：`scripts/analyze.py` と同じ得意・不得意の判定を表で表示（Claude を呼ばないので無料・一瞬）
 - **履歴**：出題済みの問題・解答・講評を見返す（採点基準 `rubrics/` は画面から読めません）
 - **設定**：`examples/` のサンプルをコピー、または Claude と対話して試験を設定。`exam/profile.md` を画面で編集
 
-しくみは単純で、画面で選んだ内容を `claude -p "/drill web 5"` のようにして**このリポジトリのスキルをそのまま呼んでいる**だけです。出題・検証・採点のルールも、記録されるファイル（`questions/` `log/` など）も、ターミナルで使うときと同じなので、両方を行き来できます。
+画面は依頼を Claude Code に渡して返事を見せるだけで、出題・検証・採点はこのリポジトリのスキルがそのまま行います。記録されるファイル（`questions/` `log/` など）もターミナルで使うときと同じなので、両方を行き来できます。Claude Code への渡し方は2通りあります。
 
-- 必要なもの：Python 3（標準ライブラリのみ）と、ログイン済みの [Claude Code](https://docs.claude.com/en/docs/claude-code/overview)（Pro / Max のサブスクリプションか API キー）
-- `claude -p` は対話で許可を求められないので、スキルが使う操作（このフォルダ内のファイル編集と `scripts/` の実行など）だけを許可して動かします（`webui/server.py` の `ALLOWED_TOOLS`）
-- サブエージェント（verifier・grader）の出力や、採点基準を書き込む操作の中身は画面に流しません
+### A. PC の Claude Code に `/loop` で処理させる（既定）
+
+```bash
+python3 webui/server.py          # → http://127.0.0.1:8765/
+claude                           # 別のターミナルで、このフォルダで起動して
+> /loop 1m /inbox                # 1分ごとにブラウザからの依頼を処理する
+```
+
+- 画面での操作は `inbox/<依頼>/NNN-user.md` に置かれ、`/inbox` スキル（`.claude/skills/inbox/`）が処理して `NNN-claude.md` に返事を書きます。サーバー自身は Claude を呼びません
+- いつもの Claude Code（サブスクリプションでも API キーでも）をそのまま使います。1つのセッションが回り続けるので、会話の流れも引き継がれます
+- 放っておいても進むように、`claude --permission-mode acceptEdits` で起動するか、`python3 scripts/stats.py` `python3 scripts/analyze.py` `date` `mkdir` などを許可しておくと止まりません
+- 依頼は並べて置けます。返事が来るまで、画面には「Claude Code が拾うのを待っています」と出ます
+
+### B. サーバーが `claude -p` で処理する（API キーでも可）
+
+常駐の Claude Code を用意しないときは、サーバーが依頼ごとに `claude -p "/drill web 5"` を起動します。
+
+```bash
+python3 webui/server.py --runner cli
+ANTHROPIC_API_KEY=sk-ant-... python3 webui/server.py --runner cli   # API キー（従量課金）で動かす
+```
+
+- 認証は `claude` コマンドと同じです：ログイン済みのサブスクリプション、`CLAUDE_CODE_OAUTH_TOKEN`（`claude setup-token` で発行）、`ANTHROPIC_API_KEY` のどれでも動きます
+- `claude -p` は対話で許可を求められないので、スキルが使う操作（このフォルダ内のファイル編集と `scripts/` の実行など）だけを許可して動かします（`webui/server.py` の `ALLOWED_TOOLS`）。サブエージェント（verifier・grader）の出力や、採点基準を書き込む操作の中身は画面に流しません
 - 同時に動かせる作業は1つだけです。問題の作成には数分かかります
-- 使うモデルを変えたいときは `LEARN_CLAUDE_ARGS="--model sonnet" python3 webui/server.py`
+- 使うモデルを変えたいときは `LEARN_CLAUDE_ARGS="--model sonnet"`
 
 ### スマホなど別の端末から使う
 
@@ -75,19 +92,15 @@ LEARN_TOKEN=好きな長い文字列 python3 webui/server.py --host 0.0.0.0
 
 ### Docker で動かす
 
-Python や Claude Code をホストに入れたくない場合は Docker でも動きます。このフォルダをそのままマウントするので、学習データはホスト側に残ります。
+Python や Claude Code をホストに入れたくない場合は Docker でも動きます（B の方式）。このフォルダをそのままマウントするので、学習データはホスト側に残ります。
 
 ```bash
-cp .env.example .env    # CLAUDE_CODE_OAUTH_TOKEN（`claude setup-token` で発行）か ANTHROPIC_API_KEY を書く
+cp .env.example .env    # CLAUDE_CODE_OAUTH_TOKEN か ANTHROPIC_API_KEY を書く
 docker compose up -d    # → http://127.0.0.1:8765/
 ```
 
 - コンテナは uid 1000 のユーザーで動きます。ホストのユーザーが uid 1000 でない場合は、`compose.yaml` に `user: "<uid>:<gid>"` を足してください
 - 別の端末から使うときは `compose.yaml` の `ports` を `"8765:8765"` にして、`.env` に `LEARN_TOKEN` を設定します
-
-### SaaS 版との違い
-
-[imohiyoko/learning](https://github.com/imohiyoko/learning) は複数人で使うホスト型のサービスです。こちらは「1人・自分の PC・ファイルだけ」の雛形のまま、操作だけをブラウザでできるようにしたもので、アカウント・データベース・概念辞書・記憶（FSRS）などは持ちません。
 
 ## コマンド
 
@@ -99,6 +112,7 @@ docker compose up -d    # → http://127.0.0.1:8765/
 | `/review` | 得意・不得意な分野とその原因、ミスの傾向、次の3問 |
 | `/setup-exam` | 試験の設定・切り替え |
 | `/import-past <年度> <問>` | `refs/` の公式過去問を取り込み、公式解答例で採点できるようにする |
+| `/inbox` | ブラウザの画面から届いた依頼を処理する（`/loop 1m /inbox` で常駐） |
 
 解答は `answers/<id>.md` に書いても、チャットに直接貼っても大丈夫です。スマホから使うときはチャットに貼る方が楽です。
 紙に手書きした解答は、写真をチャットに貼るか `answers/<id>-1.jpg` のように置けば、文字に書き起こしてから採点します（読めない字だけ確認されます）。
@@ -169,7 +183,7 @@ docker compose up -d    # → http://127.0.0.1:8765/
 .
 ├ CLAUDE.md               # Claude への全体ルール
 ├ .claude/
-│  ├ skills/              # question / drill / grade / review / setup-exam / import-past
+│  ├ skills/              # question / drill / grade / review / setup-exam / import-past / inbox
 │  └ agents/              # verifier（検証役）/ grader（採点役）
 ├ exam/profile.md         # 今の試験の設定（git管理外、/setup-exam で作成）
 ├ examples/               # 試験ごとの設定サンプル
@@ -177,6 +191,7 @@ docker compose up -d    # → http://127.0.0.1:8765/
 ├ scripts/stats.py        # 成績集計と出題分野の推薦（Python標準ライブラリのみ）
 ├ scripts/analyze.py      # 得意・不得意の分析（記述式と択一を合わせて）
 ├ webui/                  # ブラウザから使うためのローカルサーバーと画面（python3 webui/server.py）
+├ inbox/                  # 画面から Claude Code への依頼（/inbox で処理。git管理外）
 ├ Dockerfile compose.yaml # Docker で動かすとき
 ├ tests/                  # スクリプトのテスト（python3 -m unittest discover -s tests）
 ├ questions/ rubrics/ answers/ results/

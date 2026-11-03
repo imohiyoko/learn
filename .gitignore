@@ -35,3 +35,6 @@ __pycache__/
 
 # Docker で使う認証情報
 .env
+
+# web UI から Claude Code への依頼（/inbox で処理）
+/inbox/

@@ -11,7 +11,7 @@
 
 `exam/profile.md` がない、または `<!-- TODO -->` が残っているなら、まず `/setup-exam` を案内すること。
 
-学習データ（`exam/`・`questions/`・`rubrics/`・`answers/`・`results/`・`log/`・`refs/`）は `.gitignore` で追跡対象外にしている。雛形だけを共有するリポジトリなので、これらを `git add -f` しない。
+学習データ（`exam/`・`questions/`・`rubrics/`・`answers/`・`results/`・`log/`・`refs/`・`inbox/`）は `.gitignore` で追跡対象外にしている。雛形だけを共有するリポジトリなので、これらを `git add -f` しない。
 
 ## ディレクトリの約束
 
@@ -49,10 +49,11 @@
 - `/grade [id]` … 解答を採点する。チャットに貼られた解答も受け付ける
 - `/review` … 成績を分析して得意・不得意な分野、その原因、次の一手を示す（`scripts/analyze.py`）
 - `/import-past` … `refs/` の公式過去問を取り込んで、公式解答例で採点できる形にする
+- `/inbox` … ブラウザの画面（`webui/`）から `inbox/` に届いた依頼を処理する。`/loop 1m /inbox` で常駐させる
 
 ## ブラウザから使われるとき
 
-`webui/server.py` は、ブラウザで選ばれた操作を `claude -p "/question web"` のようにスキルとして呼ぶ。スキルの手順・ファイルの置き場所・記録の形式を変えるときは、`webui/` が読むもの（`questions/` `answers/` `results/` の `<id>.md`、`log/*.jsonl`、`exam/profile.md` の「分野タグ」「択一問題」の節）を壊さないこと。
+`webui/server.py` は、ブラウザで選ばれた操作を `inbox/` に置き（`/inbox` スキルで処理する）、または `claude -p "/question web"` のようにスキルとして呼ぶ。スキルの手順・ファイルの置き場所・記録の形式を変えるときは、`webui/` が読むもの（`questions/` `answers/` `results/` の `<id>.md`、`log/*.jsonl`、`exam/profile.md` の「分野タグ」「択一問題」の節）を壊さないこと。
 
 ## 画像
 

@@ -26,7 +26,7 @@ class WebUITest(unittest.TestCase):
             (cls.tmp / d).mkdir()
         server.configure(cls.tmp)
         os.environ["LEARN_CLAUDE"] = str(ROOT / "tests" / "fake_claude.py")
-        cls.srv = server.make_server("127.0.0.1", 0)
+        cls.srv = server.make_server("127.0.0.1", 0, runner="cli")
         cls.base = f"http://127.0.0.1:{cls.srv.server_address[1]}"
         threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
 
@@ -142,6 +142,49 @@ class WebUITest(unittest.TestCase):
         self.assertEqual(code, 404)
         code, _ = self.call("/api/answers/..%2Fexam%2Fprofile", "PUT", {"text": "x"})
         self.assertEqual(code, 404)
+
+    def test_06_inbox(self):
+        """--runner loop：依頼を inbox/ に置き、Claude Code（/inbox）の返事を読む。"""
+        srv = server.make_server("127.0.0.1", 0, runner="loop")
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        base, self.base = self.base, f"http://127.0.0.1:{srv.server_address[1]}"
+        try:
+            (self.tmp / "exam" / "profile.md").write_text(
+                (self.tmp / "examples" / "sc" / "profile.md").read_text(encoding="utf-8"), encoding="utf-8")
+            _, st = self.call("/api/state")
+            self.assertEqual(st["runner"], "loop")
+            code, r = self.call("/api/run", "POST", {"action": "drill", "tag": "web", "count": 2})
+            self.assertEqual(code, 200, r)
+            jid = r["job"]["id"]
+            d = self.tmp / "inbox" / jid
+            self.assertIn("/drill web 2", (d / "000-user.md").read_text(encoding="utf-8"))
+            _, r = self.call(f"/api/jobs/{jid}")
+            self.assertEqual(r["job"]["status"], "running")
+            self.assertEqual(r["events"][0]["text"], "/drill web 2")
+            # 返事が来るまでは返信できない
+            code, _ = self.call(f"/api/jobs/{jid}/reply", "POST", {"text": "1ア"})
+            self.assertEqual(code, 409)
+
+            # /inbox スキルが返事を書いた
+            (d / "000-claude.md").write_text("---\nquestions: [drill-20261103-1200]\n---\n\n2問出しました。", encoding="utf-8")
+            _, r = self.call(f"/api/jobs/{jid}?after=1")
+            self.assertEqual(r["job"]["status"], "idle")
+            self.assertEqual(r["job"]["question_ids"], ["drill-20261103-1200"])
+            self.assertEqual([e["type"] for e in r["events"]], ["text", "end"])
+            self.assertEqual(r["events"][0]["text"], "2問出しました。")
+
+            code, r = self.call(f"/api/jobs/{jid}/reply", "POST", {"text": "1ア 2ウ"})
+            self.assertEqual(code, 200, r)
+            self.assertIn("1ア 2ウ", (d / "001-user.md").read_text(encoding="utf-8"))
+            _, jobs = self.call("/api/jobs")
+            self.assertEqual(jobs["jobs"][0]["id"], jid)
+            code, _ = self.call("/api/jobs/..%2F..%2Fexam")
+            self.assertEqual(code, 404)
+        finally:
+            self.base = base
+            srv.shutdown()
+            srv.server_close()
+            server.make_server("127.0.0.1", 0, runner="cli").server_close()
 
     def test_05_describe_tool(self):
         d = server.describe_tool

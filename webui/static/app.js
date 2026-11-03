@@ -48,7 +48,7 @@
       notice(S.profile === "missing"
         ? "まだ試験が設定されていません。<a href=\"#\" data-go=\"settings\">設定</a>から選んでください。"
         : "<code>exam/profile.md</code> に TODO が残っています。<a href=\"#\" data-go=\"settings\">設定</a>で埋めてください。", "warn");
-    } else if (!S.claude) {
+    } else if (S.runner === "cli" && !S.claude) {
       notice("Claude Code（<code>claude</code> コマンド）が見つかりません。出題・採点には Claude Code のインストールとログインが必要です。", "warn");
     } else notice("");
 
@@ -128,9 +128,12 @@
 
   function setStatus(j) {
     const running = j.status === "running";
-    $("#session-status").textContent = running ? "Claude が作業中…（問題の作成には数分かかります）" : j.status === "error" ? "エラーで止まりました" : "返信できます";
+    const loop = S && S.runner === "loop";
+    $("#session-status").textContent = running
+      ? (loop ? "Claude Code が拾うのを待っています（PC で /loop 1m /inbox を動かしておいてください）" : "Claude が作業中…（問題の作成には数分かかります）")
+      : j.status === "error" ? "エラーで止まりました" : "返信できます";
     $("#session-status").classList.toggle("running", running);
-    $("#stop-btn").hidden = !running;
+    $("#stop-btn").hidden = !running || loop;
     $("#reply").hidden = running || !j.can_reply;
     $("#start-btn").disabled = running;
     if (S) S.busy = running;

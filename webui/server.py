@@ -2,12 +2,18 @@
 """ブラウザから学習を回すためのローカルサーバー。標準ライブラリのみ。
 
 出題・採点などの中身は、これまでどおり Claude Code のスキル（.claude/skills/）が行う。
-このサーバーは、ブラウザで選んだ内容を `claude -p "/question web"` のように渡し、
-その出力をブラウザに流すだけ。学習データはこれまでと同じファイル（questions/ log/ など）に残る。
+このサーバーは、ブラウザで選んだ内容を Claude Code に渡し、返事をブラウザに見せるだけ。
+学習データはこれまでと同じファイル（questions/ log/ など）に残る。渡し方は2つ：
+
+  --runner loop（既定）  依頼を inbox/ に置く。このフォルダで動かしている Claude Code が
+                         `/loop 1m /inbox` で拾って処理し、返事を inbox/ に書く
+  --runner cli           このサーバーが `claude -p "/question web"` を起動して処理する
+                         （Docker など、常駐の Claude Code がないとき）
 
 使い方:
   python3 webui/server.py                 http://127.0.0.1:8765 で起動
   python3 webui/server.py --port 9000
+  python3 webui/server.py --runner cli    claude -p で処理する
   LEARN_TOKEN=xxxx python3 webui/server.py --host 0.0.0.0
                                           同じLANのスマホから使う（トークン必須）
 
@@ -182,7 +188,8 @@ def state():
         "examples": list_examples(),
         "recommend": {"written": recommend("history"), "drill": recommend("drill")},
         "drill_count": drill_default_count(),
-        "claude": bool(shutil.which(claude_bin())),
+        "runner": RUNNER,
+        "claude": RUNNER == "loop" or bool(shutil.which(claude_bin())),
         "busy": JOBS.busy(),
     }
 
@@ -299,7 +306,24 @@ class Jobs:
         threading.Thread(target=run_claude, args=(job, prompt), daemon=True).start()
         return job
 
-    def reply(self, job, text):
+    def events(self, jid, after, wait):
+        job = self.get(jid)
+        if not job:
+            return None
+        with job.cond:
+            if len(job.events) <= after and wait:
+                job.cond.wait(timeout=wait)
+            return job.summary(), job.events[after:]
+
+    def stop(self, jid):
+        job = self.get(jid)
+        if job and job.proc and job.proc.poll() is None:
+            job.proc.terminate()
+
+    def reply(self, jid, text):
+        job = self.get(jid)
+        if not job:
+            raise LookupError("見つかりません")
         with self.lock:
             if any(j.status == "running" for j in self.jobs.values()):
                 raise RuntimeError("ほかの作業が実行中です。終わってからもう一度どうぞ")
@@ -308,9 +332,126 @@ class Jobs:
             job.status = "running"
         job.add({"type": "user", "text": text})
         threading.Thread(target=run_claude, args=(job, text, job.session_id), daemon=True).start()
+        return job.summary()
+
+
+INBOX_NOTE = """<!-- learn web UI からの依頼。Claude Code の /inbox スキルが処理して、同じフォルダに NNN-claude.md を書く -->
+"""
+
+
+class InboxJobs:
+    """claude を自分では起動せず、依頼を inbox/ に置くだけのやり方。
+
+    PC で常駐している Claude Code（例：`/loop 1m /inbox`）が inbox/ を見て処理し、
+    返事を同じフォルダに書く。会話は1つのフォルダ＝1つの依頼：
+
+      inbox/<job>/meta.json        画面での名前など
+      inbox/<job>/000-user.md      最初の依頼（/drill web 5 など）
+      inbox/<job>/000-claude.md    Claude の返事（front matter に questions: [<id>]）
+      inbox/<job>/001-user.md      学習者の返信（1ア 2ウ … など）
+      ...
+    """
+
+    MSG_RE = re.compile(r"^(\d{3})-(user|claude)\.md$")
+
+    def __init__(self):
+        self.lock = threading.Lock()
+
+    @property
+    def base(self):
+        return ROOT / "inbox"
+
+    def _dir(self, jid):
+        return safe_child(self.base, jid) if re.match(r"^[0-9a-z-]+$", jid or "") else None
+
+    def _read(self, d):
+        try:
+            meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        msgs = {}
+        for p in d.iterdir():
+            m = self.MSG_RE.match(p.name)
+            if m:
+                msgs.setdefault(int(m.group(1)), {})[m.group(2)] = p
+        events, qids, pending = [], [], False
+        for n in sorted(msgs):
+            pair = msgs[n]
+            if "user" in pair:
+                text = pair["user"].read_text(encoding="utf-8").replace(INBOX_NOTE, "").strip()
+                events.append({"type": "user", "text": text})
+            if "claude" in pair:
+                body = pair["claude"].read_text(encoding="utf-8")
+                fm = front_matter(body)
+                for q in re.findall(r"[A-Za-z0-9][A-Za-z0-9_.-]*", fm.get("questions", "")):
+                    if q not in qids and ID_RE.match(q):
+                        qids.append(q)
+                text = re.sub(r"^---\n.*?\n---\n", "", body, count=1, flags=re.S).strip()
+                events.append({"type": "text", "text": text})
+                events.append({"type": "end"})
+            elif "user" in pair:
+                pending = True
+        for i, e in enumerate(events):
+            e["seq"] = i
+        last = max(msgs) if msgs else -1
+        summary = {"id": d.name, "title": meta.get("title", d.name), "created": meta.get("created"),
+                   "status": "running" if pending else "idle", "question_ids": qids,
+                   "target": meta.get("target"), "can_reply": not pending, "waiting": pending, "next": last + 1}
+        return summary, events
+
+    def busy(self):
+        return False  # 依頼は順番に並ぶので、いくつ置いてもよい
+
+    def list(self):
+        if not self.base.is_dir():
+            return []
+        out = [self._read(d) for d in self.base.iterdir() if d.is_dir()]
+        out = [o[0] for o in out if o]
+        return sorted(out, key=lambda j: j.get("created") or "", reverse=True)[:50]
+
+    def _write_user(self, d, n, text):
+        (d / f"{n:03d}-user.md").write_text(INBOX_NOTE + "\n" + text.strip() + "\n", encoding="utf-8")
+
+    def start(self, prompt, title, target=None):
+        with self.lock:
+            jid = datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
+            d = self.base / jid
+            d.mkdir(parents=True)
+            (d / "meta.json").write_text(json.dumps({"title": title, "created": now_iso(), "target": target},
+                                                    ensure_ascii=False), encoding="utf-8")
+            self._write_user(d, 0, prompt)
+        return self._read(d)[0]
+
+    def events(self, jid, after, wait):
+        d = self._dir(jid)
+        if not d or not d.is_dir():
+            return None
+        deadline = time.time() + (wait or 0)
+        while True:
+            r = self._read(d)
+            if r is None:
+                return None
+            if len(r[1]) > after or time.time() >= deadline:
+                return r[0], r[1][after:]
+            time.sleep(1)
+
+    def reply(self, jid, text):
+        d = self._dir(jid)
+        with self.lock:
+            r = self._read(d) if d and d.is_dir() else None
+            if not r:
+                raise LookupError("見つかりません")
+            if r[0]["waiting"]:
+                raise RuntimeError("まだ前の依頼の返事が来ていません")
+            self._write_user(d, r[0]["next"], text)
+        return self._read(d)[0]
+
+    def stop(self, jid):
+        pass
 
 
 JOBS = Jobs()
+RUNNER = "cli"
 
 
 def claude_command(prompt, resume=None):
@@ -524,17 +665,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"text": PROFILE.read_text(encoding="utf-8") if PROFILE.exists() else None})
             if path == "/api/jobs":
                 return self.send_json({"jobs": JOBS.list()})
-            m = re.match(r"^/api/jobs/([0-9a-f]+)$", path)
+            m = re.match(r"^/api/jobs/([0-9a-z-]+)$", path)
             if m:
-                job = JOBS.get(m.group(1))
-                if not job:
+                r = JOBS.events(m.group(1), int(q.get("after", 0)), min(float(q.get("wait", 0) or 0), 30))
+                if not r:
                     return self.error(404, "見つかりません")
-                after = int(q.get("after", 0))
-                with job.cond:
-                    if len(job.events) <= after:
-                        job.cond.wait(timeout=float(q.get("wait", 0) or 0))
-                    events = job.events[after:]
-                return self.send_json({"job": job.summary(), "events": events})
+                return self.send_json({"job": r[0], "events": r[1]})
             if path.startswith("/assets/"):
                 p = safe_child(ASSETS, path[len("/assets/"):])
                 if not p or not p.is_file() or p.suffix.lower() not in CONTENT_TYPES:
@@ -555,22 +691,17 @@ class Handler(BaseHTTPRequestHandler):
                 prompt, title, *target = build_prompt(body)
                 if body.get("action") != "setup" and profile_status() != "ok":
                     return self.error(409, "先に試験の設定をしてください")
-                return self.send_json({"job": JOBS.start(prompt, title, *target).summary()})
-            m = re.match(r"^/api/jobs/([0-9a-f]+)/reply$", path)
+                job = JOBS.start(prompt, title, *target)
+                return self.send_json({"job": job if isinstance(job, dict) else job.summary()})
+            m = re.match(r"^/api/jobs/([0-9a-z-]+)/reply$", path)
             if m:
-                job = JOBS.get(m.group(1))
                 text = str(body.get("text") or "").strip()
-                if not job:
-                    return self.error(404, "見つかりません")
                 if not text:
                     return self.error(400, "空です")
-                JOBS.reply(job, text[:20000])
-                return self.send_json({"job": job.summary()})
-            m = re.match(r"^/api/jobs/([0-9a-f]+)/stop$", path)
+                return self.send_json({"job": JOBS.reply(m.group(1), text[:20000])})
+            m = re.match(r"^/api/jobs/([0-9a-z-]+)/stop$", path)
             if m:
-                job = JOBS.get(m.group(1))
-                if job and job.proc and job.proc.poll() is None:
-                    job.proc.terminate()
+                JOBS.stop(m.group(1))
                 return self.send_json({"ok": True})
             if path == "/api/setup-example":
                 key = str(body.get("key") or "")
@@ -582,6 +713,8 @@ class Handler(BaseHTTPRequestHandler):
                 PROFILE.parent.mkdir(exist_ok=True)
                 shutil.copyfile(src / "profile.md", PROFILE)
                 return self.send_json({"ok": True})
+        except LookupError as e:
+            return self.error(404, str(e))
         except (ValueError, RuntimeError) as e:
             return self.error(400 if isinstance(e, ValueError) else 409, str(e))
         except Exception as e:
@@ -618,7 +751,15 @@ class Handler(BaseHTTPRequestHandler):
 LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 
 
-def make_server(host="127.0.0.1", port=8765, token=None, allow_no_token=False):
+RUNNERS = {"loop": InboxJobs, "cli": Jobs}
+
+
+def make_server(host="127.0.0.1", port=8765, token=None, allow_no_token=False, runner="loop"):
+    global JOBS, RUNNER
+    if runner not in RUNNERS:
+        raise SystemExit(f"--runner は {' / '.join(RUNNERS)} のどれかです")
+    RUNNER = runner
+    JOBS = RUNNERS[runner]()
     if host not in LOOPBACK and not token and not allow_no_token:
         raise SystemExit("127.0.0.1 以外で待ち受けるときは LEARN_TOKEN を設定してください"
                          "（ポートを外に出さない Docker などでは --allow-no-token）")
@@ -634,11 +775,16 @@ def main():
     ap.add_argument("--port", type=int, default=int(os.environ.get("LEARN_PORT", "8765")))
     ap.add_argument("--allow-no-token", action="store_true",
                     help="127.0.0.1 以外でもトークンなしで待ち受ける（外から届かない環境だけで使う）")
+    ap.add_argument("--runner", choices=sorted(RUNNERS), default=os.environ.get("LEARN_RUNNER", "loop"),
+                    help="loop：依頼を inbox/ に置き、常駐している Claude Code（/loop 1m /inbox）に処理させる（既定）。"
+                         "cli：このサーバーが claude -p を起動して処理する")
     args = ap.parse_args()
-    srv = make_server(args.host, args.port, os.environ.get("LEARN_TOKEN"), args.allow_no_token)
+    srv = make_server(args.host, args.port, os.environ.get("LEARN_TOKEN"), args.allow_no_token, args.runner)
     shown = "127.0.0.1" if args.host in ("0.0.0.0", "::") else args.host
     print(f"learn web UI: http://{shown}:{args.port}/" + ("?token=..." if os.environ.get("LEARN_TOKEN") else ""))
-    if not shutil.which(claude_bin()):
+    if args.runner == "loop":
+        print("依頼は inbox/ に置きます。このフォルダで Claude Code を起動し、`/loop 1m /inbox` で処理してください")
+    elif not shutil.which(claude_bin()):
         print(f"warning: `{claude_bin()}` が見つかりません。出題・採点には Claude Code が必要です", file=sys.stderr)
     try:
         srv.serve_forever()

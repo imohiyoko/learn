@@ -17,7 +17,8 @@ services:
       - path: .env
         required: false
     # ポートは 127.0.0.1 にしか出していないので、トークンなしでも待ち受けられるようにしている
-    command: ["python3", "webui/server.py", "--allow-no-token"]
+    # コンテナの中には常駐の Claude Code がないので、サーバーが claude -p を起動する（--runner cli）
+    command: ["python3", "webui/server.py", "--allow-no-token", "--runner", "cli"]
     restart: unless-stopped
 
 volumes:
