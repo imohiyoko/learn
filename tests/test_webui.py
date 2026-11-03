@@ -1,4 +1,5 @@
-"""webui/server.py のテスト。claude の代わりに tests/fake_claude.py を使い、一時フォルダで動かす。"""
+"""web UI（webui/server.py・learn/web/）のテスト。claude の代わりに tests/fake_claude.py を使い、一時フォルダで動かす。"""
+import hashlib
 import json
 import os
 import shutil
@@ -12,9 +13,9 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "webui"))
+sys.path.insert(0, str(ROOT))
 
-import server  # noqa: E402
+from learn.web import app, files, jobs  # noqa: E402
 
 
 class WebUITest(unittest.TestCase):
@@ -24,9 +25,9 @@ class WebUITest(unittest.TestCase):
         shutil.copytree(ROOT / "examples", cls.tmp / "examples")
         for d in ("exam", "questions", "rubrics", "answers", "results", "log"):
             (cls.tmp / d).mkdir()
-        server.configure(cls.tmp)
+        files.configure(cls.tmp)
         os.environ["LEARN_CLAUDE"] = str(ROOT / "tests" / "fake_claude.py")
-        cls.srv = server.make_server("127.0.0.1", 0, runner="cli")
+        cls.srv = app.make_server("127.0.0.1", 0, runner="cli")
         cls.base = f"http://127.0.0.1:{cls.srv.server_address[1]}"
         threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
 
@@ -34,7 +35,7 @@ class WebUITest(unittest.TestCase):
     def tearDownClass(cls):
         cls.srv.shutdown()
         cls.srv.server_close()
-        server.configure(ROOT)
+        files.configure(ROOT)
         shutil.rmtree(cls.tmp)
 
     def call(self, path, method="GET", body=None, headers=None):
@@ -116,7 +117,7 @@ class WebUITest(unittest.TestCase):
         self.assertEqual(items["items"][0]["id"], "20261103-1200-web")
 
     def test_02_prompts(self):
-        b = server.build_prompt
+        b = jobs.build_prompt
         self.assertEqual(b({"action": "question", "past": "past-r06a-q1"})[0], "/question past-r06a-q1")
         self.assertEqual(b({"action": "import", "year": "r06a", "q": "q1"})[0], "/import-past r06a q1")
         self.assertEqual(b({"action": "review"})[0], "/review")
@@ -144,7 +145,7 @@ class WebUITest(unittest.TestCase):
 
     def test_06_inbox(self):
         """--runner loop：依頼を inbox/ に置き、Claude Code（/inbox）の返事を読む。"""
-        srv = server.make_server("127.0.0.1", 0, runner="loop")
+        srv = app.make_server("127.0.0.1", 0, runner="loop")
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         base, self.base = self.base, f"http://127.0.0.1:{srv.server_address[1]}"
         try:
@@ -201,14 +202,14 @@ class WebUITest(unittest.TestCase):
             self.base = base
             srv.shutdown()
             srv.server_close()
-            server.make_server("127.0.0.1", 0, runner="cli").server_close()
+            app.make_server("127.0.0.1", 0, runner="cli").server_close()
 
     def test_05_describe_tool(self):
-        d = server.describe_tool
+        d = jobs.describe_tool
         self.assertEqual(d("Bash", {"command": "cat > rubrics/x.md <<'EOF'\n正解はア\nEOF"}), "$ （採点基準の操作）")
         self.assertEqual(d("Bash", {"command": "python3 scripts/stats.py --next"}), "$ python3 scripts/stats.py --next")
         self.assertNotIn("秘密", d("Bash", {"command": "echo a\n秘密"}))
-        self.assertEqual(d("Write", {"file_path": str(server.ROOT / "rubrics" / "a.md"), "content": "秘密"}), "Write rubrics/a.md")
+        self.assertEqual(d("Write", {"file_path": str(files.ROOT / "rubrics" / "a.md"), "content": "秘密"}), "Write rubrics/a.md")
 
     def test_06_port_fallback(self):
         # 使っているポートを指定すると、次の空いている番号で起動する
@@ -216,9 +217,9 @@ class WebUITest(unittest.TestCase):
         if busy >= 65535:
             self.skipTest("末尾のポート")
         with self.assertRaises(SystemExit):
-            server.make_server("127.0.0.1", busy, runner="cli").server_close()
+            app.make_server("127.0.0.1", busy, runner="cli").server_close()
         try:
-            srv = server.make_server("127.0.0.1", busy, runner="cli", tries=20)
+            srv = app.make_server("127.0.0.1", busy, runner="cli", tries=20)
         except SystemExit:
             self.skipTest("近くのポートが埋まっている")
         try:
@@ -228,15 +229,15 @@ class WebUITest(unittest.TestCase):
 
     def test_04_token(self):
         with self.assertRaises(SystemExit):
-            server.make_server("0.0.0.0", 0)
-        srv = server.make_server("127.0.0.1", 0, token="secret")
+            app.make_server("0.0.0.0", 0)
+        srv = app.make_server("127.0.0.1", 0, token="secret")
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         base = f"http://127.0.0.1:{srv.server_address[1]}"
         try:
             with self.assertRaises(urllib.error.HTTPError) as cm:
                 urllib.request.urlopen(base + "/api/state")
             self.assertEqual(cm.exception.code, 401)
-            req = urllib.request.Request(base + "/api/state", headers={"Cookie": f"learn_token_{server.hashlib.sha256(b'secret').hexdigest()[:12]}=secret"})
+            req = urllib.request.Request(base + "/api/state", headers={"Cookie": f"learn_token_{hashlib.sha256(b'secret').hexdigest()[:12]}=secret"})
             with urllib.request.urlopen(req) as r:
                 self.assertEqual(r.status, 200)
         finally:
@@ -336,7 +337,7 @@ class WebUITest(unittest.TestCase):
         self.assertEqual({x["path"] for x in r["refs"]}, {"past/r06a 午後 q1.pdf", "past/README.md"})
 
     def test_09_setup_exam_name(self):
-        b = server.build_prompt
+        b = jobs.build_prompt
         self.assertEqual(b({"action": "setup", "exam": "応用情報技術者試験"})[0], "/setup-exam 応用情報技術者試験")
         self.assertEqual(b({"action": "setup"})[0], "/setup-exam")
         for bad in ("/review", "a\nb", "x" * 61):
@@ -392,9 +393,9 @@ class WebUITest(unittest.TestCase):
         _, a = self.call("/api/analysis")
         self.assertEqual(a["analysis"]["asks"]["total"], 1)
         self.assertEqual(a["analysis"]["tags"]["network"]["asks"], {"word": 1})
-        self.assertEqual(server.build_prompt({"action": "glossary", "terms": "DMARC、SPF"})[0], "/glossary DMARC、SPF")
+        self.assertEqual(jobs.build_prompt({"action": "glossary", "terms": "DMARC、SPF"})[0], "/glossary DMARC、SPF")
         with self.assertRaises(ValueError):
-            server.build_prompt({"action": "glossary", "terms": "/review"})
+            jobs.build_prompt({"action": "glossary", "terms": "/review"})
 
 
     def test_11_bank_sets(self):
@@ -479,9 +480,9 @@ class WebUITest(unittest.TestCase):
         # セットの外は読めない
         code, _ = self.call("/api/sets/..%2Fexam")
         self.assertEqual(code, 404)
-        self.assertEqual(server.build_prompt({"action": "grade-set", "id": s["id"]})[0], f"/grade-set {s['id']}")
+        self.assertEqual(jobs.build_prompt({"action": "grade-set", "id": s["id"]})[0], f"/grade-set {s['id']}")
         with self.assertRaises(ValueError):
-            server.build_prompt({"action": "grade-set", "id": "../x"})
+            jobs.build_prompt({"action": "grade-set", "id": "../x"})
 
     def test_12_set_word_ask(self):
         # test_11 の問題バンクを使う。選択肢は「正しい／違う」

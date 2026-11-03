@@ -68,7 +68,7 @@
 
 ## ブラウザから使われるとき
 
-`webui/server.py` は、ブラウザで選ばれた操作を `inbox/` に置き（`/inbox` スキルで処理する）、または `claude -p "/question web"` のようにスキルとして呼ぶ。スキルの手順・ファイルの置き場所・記録の形式を変えるときは、`webui/` が読むもの（`questions/` `answers/` `results/` の `<id>.md`。解答欄は問題の「## 設問」にある `**設問N**`・`(n)`・`N字以内` から作り、`answers/<id>.md` の `## 設問N` / `(n)` の見出しで欄に戻す、`log/*.jsonl`、`exam/profile.md` の「分野タグ」「択一問題」の節）を壊さないこと。
+`webui/server.py`（中身は `learn/web/`）は、ブラウザで選ばれた操作を `inbox/` に置き（`/inbox` スキルで処理する）、または `claude -p "/question web"` のようにスキルとして呼ぶ。スキルの手順・ファイルの置き場所・記録の形式を変えるときは、`webui/` が読むもの（`questions/` `answers/` `results/` の `<id>.md`。解答欄は問題の「## 設問」にある `**設問N**`・`(n)`・`N字以内` から作り、`answers/<id>.md` の `## 設問N` / `(n)` の見出しで欄に戻す、`log/*.jsonl`、`exam/profile.md` の「分野タグ」「択一問題」の節）を壊さないこと。
 
 ## 画像
 
