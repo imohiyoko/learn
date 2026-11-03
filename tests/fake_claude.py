@@ -4,7 +4,9 @@
 /question なら questions/ と answers/ にファイルを作り、そのことをツール呼び出しとして出す。
 """
 import json
+import os
 import sys
+import time
 from pathlib import Path
 
 args = sys.argv[1:]
@@ -18,6 +20,9 @@ def out(obj):
 
 
 out({"type": "system", "subtype": "init", "session_id": sid})
+time.sleep(float(os.environ.get("FAKE_CLAUDE_SLEEP", "0")))
+if os.environ.get("FAKE_CLAUDE_GARBAGE"):
+    print("[1, 2, 3]", flush=True)  # オブジェクトでない JSON 行
 content = []
 if prompt.startswith("/question"):
     qid = "20261103-1200-web"

@@ -29,6 +29,7 @@ import os
 import re
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -69,13 +70,13 @@ def configure(root):
 configure(ROOT)
 
 # claude -p は対話で許可を求められないので、スキルが使う操作だけを許可しておく。
-# ファイルの書き込みはこのフォルダの中だけ（acceptEdits）。
+# ファイルの書き込み（Write / Edit）はここに入れず、acceptEdits に任せる。acceptEdits が
+# 承認するのはこのフォルダの中の編集だけなので、外への書き込みは断られる。
 ALLOWED_TOOLS = [
-    "Read", "Write", "Edit", "Glob", "Grep", "Task", "Agent", "WebSearch", "WebFetch",
+    "Read", "Glob", "Grep", "Task", "Agent", "WebSearch", "WebFetch",
     "Bash(python3 scripts/stats.py:*)", "Bash(python3 scripts/analyze.py:*)",
     "Bash(python scripts/stats.py:*)", "Bash(python scripts/analyze.py:*)",
-    "Bash(date:*)", "Bash(mkdir:*)", "Bash(ls:*)", "Bash(cp:*)", "Bash(mv:*)",
-    "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)", "Bash(printf:*)", "Bash(echo:*)",
+    "Bash(date:*)", "Bash(mkdir:*)", "Bash(ls:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)",
     "Bash(pdftoppm:*)", "Bash(pdfinfo:*)",
 ]
 
@@ -96,7 +97,9 @@ def profile_status():
     if not PROFILE.exists():
         return "missing"
     text = PROFILE.read_text(encoding="utf-8")
-    return "todo" if "<!-- TODO" in text else "ok"
+    if "<!-- TODO" in text or not stats.load_tags(PROFILE):
+        return "todo"
+    return "ok"
 
 
 def exam_name():
@@ -158,8 +161,11 @@ def list_items():
         path, _ = LOGS[name]
         for row in stats.load_history(path):
             rid = str(row.get("id", ""))
-            base = re.sub(r"-q\d+$", "", rid) if name == "drill" else rid
-            s = scores.setdefault(base, [0, 0])
+            if name == "history":
+                # 同じ問題を採点し直したら、最新の1行だけを使う（load_history は時刻順）
+                scores[rid] = [row.get("score", 0), row.get("max", 0)]
+                continue
+            s = scores.setdefault(re.sub(r"-q\d+$", "", rid), [0, 0])
             s[0] += row.get("score", 0)
             s[1] += row.get("max", 0)
     items = []
@@ -179,7 +185,7 @@ def list_items():
     return items
 
 
-def state():
+def state(jobs, runner):
     tags = stats.load_tags(PROFILE)
     return {
         "profile": profile_status(),
@@ -188,9 +194,9 @@ def state():
         "examples": list_examples(),
         "recommend": {"written": recommend("history"), "drill": recommend("drill")},
         "drill_count": drill_default_count(),
-        "runner": RUNNER,
-        "claude": RUNNER == "loop" or bool(shutil.which(claude_bin())),
-        "busy": JOBS.busy(),
+        "runner": runner,
+        "claude": runner == "loop" or bool(shutil.which(claude_bin())),
+        "busy": jobs.busy(),
     }
 
 
@@ -278,6 +284,8 @@ class Job:
 
 
 class Jobs:
+    KEEP = 30
+
     def __init__(self):
         self.lock = threading.Lock()
         self.jobs = {}
@@ -302,9 +310,16 @@ class Jobs:
             job = Job(title, target)
             self.jobs[job.id] = job
             self.order.append(job.id)
+            # 古い会話は捨てる（メモリを使い続けないように）
+            while len(self.order) > self.KEEP:
+                del self.jobs[self.order.pop(0)]
         job.add({"type": "user", "text": prompt})
         threading.Thread(target=run_claude, args=(job, prompt), daemon=True).start()
         return job
+
+    def grading(self, qid):
+        with self.lock:
+            return any(j.status == "running" and j.target == qid for j in self.jobs.values())
 
     def events(self, jid, after, wait):
         job = self.get(jid)
@@ -402,6 +417,9 @@ class InboxJobs:
     def busy(self):
         return False  # 依頼は順番に並ぶので、いくつ置いてもよい
 
+    def grading(self, qid):
+        return any(j["status"] == "running" and j.get("target") == qid for j in self.list())
+
     def list(self):
         if not self.base.is_dir():
             return []
@@ -450,8 +468,6 @@ class InboxJobs:
         pass
 
 
-JOBS = Jobs()
-RUNNER = "cli"
 
 
 def claude_command(prompt, resume=None):
@@ -477,8 +493,7 @@ def describe_tool(name, inp):
             return "$ （採点基準の操作）"
         first = cmd.splitlines()[0] if cmd.strip() else ""
         return f"$ {first[:160]}" + (" …" if len(first) > 160 or "\n" in cmd else "")
-    if inp.get("description"):
-        return f"{name}: {str(inp['description'])[:120]}"
+    # Task / Agent の description などは、正解に触れることがあるので出さない
     return name
 
 
@@ -508,6 +523,19 @@ def handle_message(job, msg):
 
 def run_claude(job, prompt, resume=None):
     try:
+        _run_claude(job, prompt, resume)
+    except Exception as e:  # どんな失敗でも「実行中」のまま残さない
+        proc = job.proc
+        if proc and proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        job.add({"type": "error", "text": f"{type(e).__name__}: {e}"})
+        job.status = "error"
+        job.add({"type": "end"})
+
+
+def _run_claude(job, prompt, resume=None):
+    try:
         proc = subprocess.Popen(claude_command(prompt, resume), cwd=ROOT, stdin=subprocess.DEVNULL,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8")
     except FileNotFoundError:
@@ -526,8 +554,12 @@ def run_claude(job, prompt, resume=None):
             if not line:
                 continue
             try:
-                handle_message(job, json.loads(line))
+                msg = json.loads(line)
             except json.JSONDecodeError:
+                msg = None
+            if isinstance(msg, dict):
+                handle_message(job, msg)
+            else:
                 job.add({"type": "text", "text": line})
         t.join()
         code = proc.wait()
@@ -557,6 +589,8 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "learn-webui"
     token = None
     allowed_hosts = None
+    jobs = None
+    runner = None
 
     def log_message(self, fmt, *args):
         if os.environ.get("LEARN_VERBOSE"):
@@ -650,7 +684,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             if path == "/api/state":
-                return self.send_json(state())
+                return self.send_json(state(self.jobs, self.runner))
             if path == "/api/analysis":
                 return self.send_json({"analysis": analysis()})
             if path == "/api/items":
@@ -664,10 +698,10 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/profile":
                 return self.send_json({"text": PROFILE.read_text(encoding="utf-8") if PROFILE.exists() else None})
             if path == "/api/jobs":
-                return self.send_json({"jobs": JOBS.list()})
+                return self.send_json({"jobs": self.jobs.list()})
             m = re.match(r"^/api/jobs/([0-9a-z-]+)$", path)
             if m:
-                r = JOBS.events(m.group(1), int(q.get("after", 0)), min(float(q.get("wait", 0) or 0), 30))
+                r = self.jobs.events(m.group(1), int(q.get("after", 0)), min(float(q.get("wait", 0) or 0), 30))
                 if not r:
                     return self.error(404, "見つかりません")
                 return self.send_json({"job": r[0], "events": r[1]})
@@ -691,17 +725,17 @@ class Handler(BaseHTTPRequestHandler):
                 prompt, title, *target = build_prompt(body)
                 if body.get("action") != "setup" and profile_status() != "ok":
                     return self.error(409, "先に試験の設定をしてください")
-                job = JOBS.start(prompt, title, *target)
+                job = self.jobs.start(prompt, title, *target)
                 return self.send_json({"job": job if isinstance(job, dict) else job.summary()})
             m = re.match(r"^/api/jobs/([0-9a-z-]+)/reply$", path)
             if m:
                 text = str(body.get("text") or "").strip()
                 if not text:
                     return self.error(400, "空です")
-                return self.send_json({"job": JOBS.reply(m.group(1), text[:20000])})
+                return self.send_json({"job": self.jobs.reply(m.group(1), text[:20000])})
             m = re.match(r"^/api/jobs/([0-9a-z-]+)/stop$", path)
             if m:
-                JOBS.stop(m.group(1))
+                self.jobs.stop(m.group(1))
                 return self.send_json({"ok": True})
             if path == "/api/setup-example":
                 key = str(body.get("key") or "")
@@ -740,6 +774,8 @@ class Handler(BaseHTTPRequestHandler):
                 p = safe_child(VIEWABLE["answers"], qid + ".md")
                 if not p or not (VIEWABLE["questions"] / f"{qid}.md").is_file():
                     return self.error(404, "その問題はありません")
+                if self.jobs.grading(qid):
+                    return self.error(409, "採点中なので、いまは保存できません")
                 p.parent.mkdir(exist_ok=True)
                 p.write_text(text, encoding="utf-8")
                 return self.send_json({"ok": True})
@@ -754,19 +790,31 @@ LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 RUNNERS = {"loop": InboxJobs, "cli": Jobs}
 
 
+class Server(ThreadingHTTPServer):
+    daemon_threads = True
+
+
+class Server6(Server):
+    address_family = socket.AF_INET6
+
+
 def make_server(host="127.0.0.1", port=8765, token=None, allow_no_token=False, runner="loop"):
-    global JOBS, RUNNER
     if runner not in RUNNERS:
         raise SystemExit(f"--runner は {' / '.join(RUNNERS)} のどれかです")
-    RUNNER = runner
-    JOBS = RUNNERS[runner]()
     if host not in LOOPBACK and not token and not allow_no_token:
         raise SystemExit("127.0.0.1 以外で待ち受けるときは LEARN_TOKEN を設定してください"
-                         "（ポートを外に出さない Docker などでは --allow-no-token）")
-    Handler.token = token or None
-    # 127.0.0.1 だけで待ち受けるなら、Host が localhost 以外のリクエスト（DNS rebinding）を断る
-    Handler.allowed_hosts = LOOPBACK if host in LOOPBACK else None
-    return ThreadingHTTPServer((host, port), Handler)
+                         "（ポートを 127.0.0.1 にしか出さない Docker などでは --allow-no-token）")
+    # 設定はサーバーごとに持つ（同じプロセスで複数作っても混ざらないように）
+    handler = type("BoundHandler", (Handler,), {
+        "token": token or None,
+        "runner": runner,
+        "jobs": RUNNERS[runner](),
+        # トークンなしなら、Host が localhost のリクエストだけを受ける。127.0.0.1 で待ち受けるときの
+        # DNS rebinding 対策と、--allow-no-token のままポートを外に出してしまったときの歯止めを兼ねる
+        "allowed_hosts": LOOPBACK if (host in LOOPBACK or not token) else None,
+    })
+    cls = Server6 if ":" in host else Server
+    return cls((host, port), handler)
 
 
 def main():

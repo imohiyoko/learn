@@ -6,7 +6,6 @@
   let S = null; // /api/state
   let job = null; // いま表示している会話
   let seq = 0;
-  let polling = false;
   let currentQ = null;
 
   async function api(path, opts = {}) {
@@ -170,37 +169,52 @@
     }
   }
 
-  async function poll() {
-    if (polling || !job) return;
-    polling = true;
-    const id = job.id;
-    try {
-      while (job && job.id === id) {
-        const r = await api(`/api/jobs/${id}?after=${seq}&wait=20`);
-        if (!job || job.id !== id) break;
-        r.events.forEach(addEvent);
-        seq += r.events.length;
-        job = r.job;
-        setStatus(job);
-        const q = job.question_ids[job.question_ids.length - 1];
-        if (q && (q !== currentQ || r.events.some((e) => e.type === "end"))) await showQuestion(q, q !== currentQ);
-        if (job.status !== "running") {
-          if (r.events.some((e) => e.type === "end")) {
-            loadState();
-            if (job.target) showResult(job.target);
-          }
-          break;
-        }
+  // ポーリングは常に1本だけ。新しく始めると古いループは次の確認で抜ける
+  let pollGen = 0;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  function poll() { pollLoop(++pollGen); }
+
+  async function pollLoop(gen) {
+    let delay = 1000;
+    let lost = false;
+    while (gen === pollGen && job) {
+      const id = job.id;
+      let r;
+      try {
+        r = await api(`/api/jobs/${id}?after=${seq}&wait=20`);
+      } catch (err) {
+        // サーバーが一時的に落ちても、戻ってきたら監視を続ける
+        lost = true;
+        notice("サーバーとの接続が切れました。再接続しています…（" + esc(err.message) + "）", "error");
+        await sleep(delay);
+        delay = Math.min(delay * 2, 15000);
+        continue;
       }
-    } catch (err) {
-      notice("サーバーとの接続が切れました：" + esc(err.message), "error");
-    } finally { polling = false; }
+      if (lost) { notice(""); lost = false; delay = 1000; }
+      if (gen !== pollGen || !job || job.id !== id) return;
+      r.events.forEach(addEvent);
+      seq += r.events.length;
+      job = r.job;
+      setStatus(job);
+      const ended = r.events.some((e) => e.type === "end");
+      const q = job.question_ids[job.question_ids.length - 1];
+      if (q && (q !== currentQ || ended)) await showQuestion(q, q !== currentQ, id);
+      if (job.status !== "running") {
+        if (ended) {
+          loadState();
+          const t = job.target || (q && q.startsWith("drill-") ? q : null);
+          if (t) await showResult(t, id);
+        }
+        return;
+      }
+    }
   }
 
-  async function showQuestion(id, fresh) {
+  async function showQuestion(id, fresh, jid) {
     if (job && job.status === "running" && !fresh) return;
     let q;
     try { q = await api(`/api/file?kind=questions&id=${encodeURIComponent(id)}`); } catch (e) { return; }
+    if (!job || job.id !== jid) return; // 取得中に別の会話に切り替わった
     const r = md.render(q.text);
     if (r.meta.verified === "false") return; // 検証が終わるまでは出さない
     currentQ = id;
@@ -220,9 +234,10 @@
   }
 
   // 採点が終わったら講評を表示する
-  async function showResult(id) {
+  async function showResult(id, jid) {
     let f;
     try { f = await api(`/api/file?kind=results&id=${encodeURIComponent(id)}`); } catch (e) { return; }
+    if (!job || job.id !== jid) return; // 取得中に別の会話に切り替わった
     currentQ = null;
     $("#question-card").hidden = false;
     $("#question-title").textContent = "講評 " + id;
@@ -315,8 +330,13 @@
   }
 
   // ---------------------------------------------------------- 設定
-  async function loadProfile() {
+  let profileDirty = false;
+  $("#profile-text").addEventListener("input", () => { profileDirty = true; });
+  async function loadProfile(force) {
+    if (profileDirty && !force) return; // 書きかけを消さない
     const { text } = await api("/api/profile");
+    if (profileDirty && !force) return;
+    profileDirty = false;
     $("#profile-text").value = text || "";
     $("#profile-text").placeholder = "まだありません。上でサンプルを選ぶか、対話で設定してください。";
   }
@@ -330,7 +350,7 @@
       if (!confirm("いまの exam/profile.md を上書きしますか？（学習の記録は消えません）")) return;
       await api("/api/setup-example", { method: "POST", body: { key, overwrite: true } });
     }
-    await loadProfile();
+    await loadProfile(true);
     await loadState();
     $("#profile-status").textContent = "コピーしました。目標受験時期と学習者メモを書き換えて保存してください。";
   });
@@ -338,6 +358,7 @@
   $("#save-profile").addEventListener("click", async () => {
     try {
       await api("/api/profile", { method: "PUT", body: { text: $("#profile-text").value } });
+      profileDirty = false;
       $("#profile-status").textContent = "保存しました";
       loadState();
     } catch (e) { notice(esc(e.message), "error"); }
@@ -355,7 +376,8 @@
       const { jobs } = await api("/api/jobs");
       let last = null;
       try { last = localStorage.getItem("learn.job"); } catch (e) {}
-      const j = jobs.find((x) => x.id === last) || jobs.find((x) => x.status === "running");
+      // 実行中の会話を優先する（別の端末で始めたものも含めて）
+      const j = jobs.find((x) => x.status === "running") || jobs.find((x) => x.id === last);
       if (j) openJob(j);
     } catch (e) {}
   })();

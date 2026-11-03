@@ -63,7 +63,7 @@
         <div id="question-body" class="md"></div>
         <div id="answer-box" hidden>
           <h3>解答</h3>
-          <textarea id="answer-text" rows="14" spellcheck="false"></textarea>
+          <textarea id="answer-text" rows="14" spellcheck="false" aria-label="解答"></textarea>
           <div class="row">
             <button id="save-answer">保存</button>
             <button id="grade-btn" class="primary">保存して採点する</button>
@@ -80,7 +80,7 @@
         </div>
         <div id="log"></div>
         <form id="reply" class="row">
-          <textarea id="reply-text" rows="2" placeholder="返信（択一ドリルの答えは「1ア 2ウ 3エ …」）"></textarea>
+          <textarea id="reply-text" rows="2" aria-label="返信" placeholder="返信（択一ドリルの答えは「1ア 2ウ 3エ …」）"></textarea>
           <button type="submit" class="primary">送る</button>
         </form>
       </div>
@@ -120,7 +120,7 @@
     <div class="card">
       <h2>試験プロファイル <code class="small">exam/profile.md</code></h2>
       <p class="muted small">分野タグ・合格基準・択一の問題数などはここで直せます。</p>
-      <textarea id="profile-text" rows="24" spellcheck="false"></textarea>
+      <textarea id="profile-text" rows="24" spellcheck="false" aria-label="試験プロファイル"></textarea>
       <div class="row"><button id="save-profile" class="primary">保存</button><span id="profile-status" class="muted small"></span></div>
     </div>
   </section>

@@ -209,8 +209,56 @@ class WebUITest(unittest.TestCase):
         finally:
             srv.shutdown()
             srv.server_close()
-            server.Handler.token = None
-            server.Handler.allowed_hosts = server.LOOPBACK
+        # 後から作ったサーバーの設定が、先に動いているサーバーに混ざらない
+        code, _ = self.call("/api/state")
+        self.assertEqual(code, 200)
+
+    def test_07_review_fixes(self):
+        # 分野タグのない profile は未設定扱い
+        prof = self.tmp / "exam" / "profile.md"
+        saved = prof.read_text(encoding="utf-8") if prof.exists() else None
+        prof.write_text("", encoding="utf-8")
+        _, st = self.call("/api/state")
+        self.assertEqual(st["profile"], "todo")
+        code, _ = self.call("/api/run", "POST", {"action": "review"})
+        self.assertEqual(code, 409)
+        prof.write_text((self.tmp / "examples" / "sc" / "profile.md").read_text(encoding="utf-8"), encoding="utf-8")
+
+        # 同じ記述問題を採点し直したら、履歴には最新の点数だけを出す
+        qid = "20261103-0900-web"
+        (self.tmp / "questions" / f"{qid}.md").write_text("---\ntags: [web]\n---\n本文", encoding="utf-8")
+        rows = [{"id": qid, "source": "generated", "tags": ["web"], "score": s, "max": 100, "minutes": 30,
+                 "graded_at": f"2026-11-03T0{h}:00:00+09:00", "weak": [], "miss_type": {}} for s, h in ((40, 1), (70, 2))]
+        (self.tmp / "log" / "history.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+        _, items = self.call("/api/items")
+        self.assertEqual([x["score"] for x in items["items"] if x["id"] == qid], [[70, 100]])
+
+        # 採点中は解答を保存できない
+        os.environ["FAKE_CLAUDE_SLEEP"] = "1"
+        try:
+            code, r = self.call("/api/run", "POST", {"action": "grade", "id": qid})
+            self.assertEqual(code, 200, r)
+            code, _ = self.call(f"/api/answers/{qid}", "PUT", {"text": "x"})
+            self.assertEqual(code, 409)
+            self.wait_job(r["job"]["id"])
+        finally:
+            del os.environ["FAKE_CLAUDE_SLEEP"]
+        code, _ = self.call(f"/api/answers/{qid}", "PUT", {"text": "x"})
+        self.assertEqual(code, 200)
+
+        # 想定外の失敗でも「実行中」のまま残らない
+        for env in ({"LEARN_CLAUDE_ARGS": "--model 'unclosed"}, {"FAKE_CLAUDE_GARBAGE": "1"}):
+            os.environ.update(env)
+            try:
+                code, r = self.call("/api/run", "POST", {"action": "review"})
+                self.assertEqual(code, 200, r)
+                r = self.wait_job(r["job"]["id"])
+            finally:
+                for k in env:
+                    del os.environ[k]
+            self.assertNotEqual(r["job"]["status"], "running")
+        if saved is not None:
+            prof.write_text(saved, encoding="utf-8")
 
 
 if __name__ == "__main__":

@@ -27,7 +27,9 @@
   }
 
   function splitRow(line) {
-    return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+    // \| はセルの中の文字なので、列の区切りにしない
+    return line.trim().replace(/\\\|/g, "\u0001").replace(/^\|/, "").replace(/\|$/, "").split("|")
+      .map((c) => c.replace(/\u0001/g, "|").trim());
   }
 
   function render(src) {

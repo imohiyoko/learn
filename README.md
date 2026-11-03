@@ -84,9 +84,11 @@ ANTHROPIC_API_KEY=sk-ant-... python3 webui/server.py --runner cli   # API キー
 既定では自分の PC（127.0.0.1）からしか開けません。同じ LAN の端末から使うときはトークンを決めて起動し、`?token=` 付きの URL を一度開きます（以後は Cookie で覚えます）。
 
 ```bash
-LEARN_TOKEN=好きな長い文字列 python3 webui/server.py --host 0.0.0.0
-# → http://<PCのIPアドレス>:8765/?token=好きな長い文字列
+LEARN_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))") python3 webui/server.py --host 0.0.0.0
+# → http://<PCのIPアドレス>:8765/?token=<そのトークン>
 ```
+
+トークンは英数字と `-` `_` だけにしてください（`#` や `&` を含むと URL で途中までしか送られず、開けません）。
 
 インターネットに直接公開する使い方は想定していません。外から使いたいときは Tailscale などの VPN 越しにしてください。
 
@@ -99,8 +101,8 @@ cp .env.example .env    # CLAUDE_CODE_OAUTH_TOKEN か ANTHROPIC_API_KEY を書�
 docker compose up -d    # → http://127.0.0.1:8765/
 ```
 
-- コンテナは uid 1000 のユーザーで動きます。ホストのユーザーが uid 1000 でない場合は、`compose.yaml` に `user: "<uid>:<gid>"` を足してください
-- 別の端末から使うときは `compose.yaml` の `ports` を `"8765:8765"` にして、`.env` に `LEARN_TOKEN` を設定します
+- コンテナは uid 1000 のユーザーで動きます。ホストのユーザーが uid 1000 でない場合は、`compose.yaml` に `user: "<uid>:<gid>"` と、環境変数 `HOME: /tmp/home`（`claude-home` ボリュームは uid 1000 の持ち物で書き込めないため）を足してください。認証は `.env` のトークンで行うので、Claude Code の設定が残らなくても動きます
+- 別の端末から使うときは `compose.yaml` の `ports` を `"8765:8765"` にし、`command` から `--allow-no-token` を外して、`.env` に `LEARN_TOKEN` を設定します。トークンなしのままだと、`localhost` 以外の名前で開いたリクエストは断られます
 
 ## コマンド
 
