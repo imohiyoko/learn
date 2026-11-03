@@ -9,6 +9,7 @@ import { pct } from "./stats.js";
 // scripts/route.py が選んだ問題を1問ずつ。択一は答えたその場でサーバーが採点して解説を出す。
 // 記述は書いて保存し、最後に提出すると /grade-set が採点とレポートを作る
 let setAt = 0, setPick = null, setUnsure = new Set(), setGen = 0;
+const fillDrafts = {}; // 答える前の穴埋めの書きかけ（「セットID:問題ID」ごと。問題を行き来しても消さない）
 const KIND_LABEL = { choice: "択一", fill: "穴埋め", short: "記述" };
 const AUTO = (it) => it.kind === "choice" || it.kind === "fill"; // 答えたその場で採点する形式
 const SLOT_HELP = { "洗い出し": "まだ測れていない論点", "穴埋め": "苦手な論点", "やり直し": "前に間違えた問題", "確認": "得意な論点の確認" };
@@ -81,7 +82,8 @@ function drawSet() {
     const locked = answered || s.status !== "open";
     $("#set-fill").innerHTML = (it.blanks || []).map((x) => {
       const r = res[x];
-      const val = r ? r.answer : (it.answer && it.answer[x]) || "";
+      const draft = fillDrafts[`${s.id}:${it.id}`] || {};
+      const val = r ? r.answer : draft[x] ?? ((it.answer && it.answer[x]) || "");
       const mark = r ? `<span class="mark ${r.ok ? "ok" : "ng"}">${r.ok ? "○" : "×"}</span>` : "";
       return `<label class="fill-row"><span class="lbl">［${esc(x)}］</span><input data-blank="${esc(x)}" maxlength="200" value="${esc(val)}" aria-label="空欄 ${esc(x)}"${locked ? " disabled" : ""}>${mark}</label>`;
     }).join("");
@@ -115,7 +117,7 @@ function drawSet() {
   $("#set-unsure-help").hidden = it.kind !== "choice" || s.status !== "open" || answered;
   $("#set-answer").hidden = s.status !== "open" || answered;
   $("#set-answer").textContent = AUTO(it) ? "答える" : "保存して次へ";
-  $("#set-answer").disabled = AUTO(it);
+  $("#set-answer").disabled = it.kind === "choice" || (it.kind === "fill" && !Object.values(fillValue()).some((v) => v.trim()));
   $("#set-prev").disabled = setAt === 0;
   $("#set-next").textContent = setAt === s.items.length - 1 ? (s.status === "open" ? "提出へ" : "次へ") : "次へ";
   $("#set-status").textContent = it.kind === "short" ? "記述は提出後にまとめて採点します" : "";
@@ -215,6 +217,8 @@ function fillValue() {
   return Object.fromEntries($$("#set-fill [data-blank]").map((x) => [x.dataset.blank, x.value]));
 }
 $("#set-fill").addEventListener("input", () => {
+  const it = st.SET.items[setAt];
+  if (it && it.kind === "fill") fillDrafts[`${st.SET.id}:${it.id}`] = fillValue();
   $("#set-answer").disabled = !Object.values(fillValue()).some((v) => v.trim());
   timerAutoStart();
 });

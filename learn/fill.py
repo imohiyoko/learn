@@ -14,7 +14,7 @@ import unicodedata
 
 BLANK_RE = re.compile(r"［([ア-ンA-Z])］")
 KEY_LINE_RE = re.compile(r"^\s*[-*]\s*([ア-ンA-Z])\s*[：:]\s*(.+?)\s*$")
-NUM_RE = re.compile(r"^-?\d+(\.\d+)?$")
+NUM_RE = re.compile(r"^-?(\d+(\.\d*)?|\.\d+)$")
 ALT_SPLIT = re.compile(r"[｜|]")
 MAX_ANSWER = 200
 
@@ -50,8 +50,13 @@ def normalize(s):
     num = re.sub(r"円$", "", num)
     num = re.sub(r"^[△▲]", "-", num)
     if NUM_RE.match(num):
-        v = float(num)
-        return str(int(v)) if v == int(v) else repr(v)
+        # 文字のまま整える（float を通すと、大きな数・長い小数で丸め・あふれが起きる）
+        sign = "-" if num.startswith("-") else ""
+        whole, _, frac = num.lstrip("-").partition(".")
+        whole, frac = whole.lstrip("0") or "0", frac.rstrip("0")
+        if whole == "0" and not frac:
+            sign = ""
+        return sign + whole + ("." + frac if frac else "")
     return s
 
 

@@ -105,10 +105,14 @@ class ServerLinesTest(unittest.TestCase):
     def test_bank_fill(self):
         from test_fill import add_fill
         add_fill(self.tmp)
+        prof = self.tmp / "exam" / "profile.md"
+        self.assertNotIn("fill", [x["kind"] for x in sets.create_set(n=30)["items"]])  # 節がなければ出さない
+        prof.write_text(prof.read_text(encoding="utf-8") + "\n## 穴埋め問題\n", encoding="utf-8")
         from unittest import mock
         with mock.patch.dict(sets.SET_KINDS, {"fill": ("fill",)}):  # 1論点1問なので、穴埋めだけのセットを作る
             s = sets.create_set(n=3, kind="fill")
         it = next(x for x in s["items"] if x["kind"] == "fill")
+        self.assertNotIn("key", next(x for x in sets.set_view(s)["items"] if x["id"] == it["id"]))  # 答える前に正解を出さない
         with self.assertRaises(ValueError):
             sets.answer_set_item(s["id"], it["id"], "仕入")  # 空欄ごとの辞書でない
         with self.assertRaises(ValueError):

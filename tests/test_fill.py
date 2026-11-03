@@ -56,13 +56,18 @@ class FillTest(unittest.TestCase):
 
     def test_normalize_numbers_and_words(self):
         same = [("50,000", "５００００円"), ("△1,000", "-1000"), ("▲1000", "-1,000"), ("1.50", "1.5"),
-                ("買掛 金", "買掛金"), ("ＤＮＳ", "dns")]
+                ("買掛 金", "買掛金"), ("ＤＮＳ", "dns"), ("1,000.0", "1000"), ("0050", "50"), ("-0", "0"), ("0.50", ".5")]
         for a, b in same:
             with self.subTest(a=a, b=b):
                 self.assertEqual(fill.normalize(a), fill.normalize(b))
-        for a, b in (("50,000", "5,000"), ("買掛金", "売掛金"), ("1000", "-1000")):
+        for a, b in (("50,000", "5,000"), ("買掛金", "売掛金"), ("1000", "-1000"),
+                     ("9007199254740992", "9007199254740993")):
             with self.subTest(a=a, b=b):
                 self.assertNotEqual(fill.normalize(a), fill.normalize(b))
+
+    def test_huge_number_does_not_crash(self):
+        self.assertEqual(fill.normalize("⑩" * 200), "10" * 200)
+        self.assertEqual(fill.normalize("9" * 400 + ".50"), "9" * 400 + ".5")
 
     def test_grade(self):
         g = fill.grade(["ア", "イ", "ウ"], fill.key_answers(KEY), {"ア": "仕入", "イ": "50000円", "ウ": "売掛金"})

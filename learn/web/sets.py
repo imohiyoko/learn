@@ -98,7 +98,9 @@ def create_set(n=10, tag=None, kind="mixed"):
     if not 1 <= n <= 30:
         raise ValueError("問題数は1〜30です")
     with SET_LOCK:  # 同時に作っても、同じ問題が2つのセットに入らないように
-        r = route.route(files.ROOT, n=n, kinds=SET_KINDS[kind], tag=tag or None,
+        # 穴埋めは、profile に「穴埋め問題」の節があるときだけ出す（節を消せば、バンクに残っていても出さない）
+        kinds = tuple(k for k in SET_KINDS[kind] if k != "fill" or core.has_section(files.PROFILE, "穴埋め問題"))
+        r = route.route(files.ROOT, n=n, kinds=kinds, tag=tag or None,
                         pass_ratio=core.parse_pass_ratio(files.PROFILE), exclude=busy_items())
         if not r["items"]:
             raise RuntimeError("出せる問題がバンクにありません。「問題バンクを作る」で用意してください")
