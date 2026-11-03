@@ -448,6 +448,12 @@ class WebUITest(unittest.TestCase):
         self.assertEqual(r["set"]["status"], "graded")
         self.assertIn("解説です", r["set"]["report"])
         self.assertTrue(all("key" in x for x in r["set"]["items"]))
+        # 採点のあとで確認待ちに戻した問題（正解が複数ありうる）は、正解を出さない
+        f = self.tmp / "bank" / "items" / f"{ch['id']}.md"
+        f.write_text(f.read_text(encoding="utf-8").replace("verified: true", "verified: false"), encoding="utf-8")
+        _, r2 = self.call(f"/api/sets/{s['id']}")
+        self.assertNotIn("key", next(x for x in r2["set"]["items"] if x["id"] == ch["id"]))
+        f.write_text(f.read_text(encoding="utf-8").replace("verified: false", "verified: true"), encoding="utf-8")
         self.assertEqual([c["concept"] for c in r["set"]["compare"]], ch["concepts"])
         code, _ = self.call(f"/api/sets/{s['id']}/answer", "POST", {"item": ch["id"], "value": "ア"})
         self.assertEqual(code, 409)
