@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/imohiyoko/learn/schema/history-line.schema.json",
+  "title": "log/history.jsonl の1行",
+  "description": "記述式（長文・過去問）の成績。/grade が書く。imohiyoko/learning の `learning import history` も読む（形を変えるときは learning の取り込みも直す）。",
+  "type": "object",
+  "required": [
+    "id",
+    "tags",
+    "score",
+    "max",
+    "graded_at"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "description": "questions/<id>.md の id"
+    },
+    "source": {
+      "type": "string",
+      "description": "generated（生成問題）か past（公式過去問）。問題バンクの長文は問題の front matter に source がないので、ないこともある"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]*$"
+      },
+      "minItems": 1,
+      "maxItems": 20,
+      "description": "分野タグ。先頭が主タグ"
+    },
+    "score": {
+      "type": "number",
+      "minimum": 0
+    },
+    "max": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "minutes": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1440
+    },
+    "graded_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "タイムゾーン付きの ISO 8601（RFC 3339）"
+    },
+    "weak": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 50,
+      "description": "具体的な弱点（用語名や読み落とした観点）"
+    },
+    "miss_type": {
+      "type": "object",
+      "properties": {
+        "knowledge": {
+          "type": "number",
+          "minimum": 0
+        },
+        "reading": {
+          "type": "number",
+          "minimum": 0
+        },
+        "writing": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "description": "ミスの種類ごとの件数"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "long"
+      ],
+      "description": "問題バンクの長文なら long"
+    },
+    "concepts": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]*/[a-z0-9][a-z0-9_-]*$"
+      },
+      "description": "論点ID（exam/concepts.md）"
+    },
+    "difficulty": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3
+    }
+  },
+  "additionalProperties": false
+}

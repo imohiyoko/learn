@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/imohiyoko/learn/schema/glossary-line.schema.json",
+  "title": "log/glossary.jsonl の1行",
+  "description": "単語帳の1語。同じ言葉の行が複数あれば後の行の意味が優先。/glossary・/grade・/grade-set・/inbox・web UI が書く。",
+  "type": "object",
+  "required": [
+    "term",
+    "meaning",
+    "tags",
+    "source",
+    "added_at"
+  ],
+  "properties": {
+    "term": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60
+    },
+    "meaning": {
+      "type": "string",
+      "maxLength": 2000,
+      "description": "空なら意味がまだない"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]*$"
+      },
+      "maxItems": 5
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "ask",
+        "grade",
+        "glossary",
+        "manual"
+      ]
+    },
+    "from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "出どころの問題 id かセット id"
+    },
+    "added_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "タイムゾーン付きの ISO 8601（RFC 3339）"
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/imohiyoko/learn/schema/drill-line.schema.json",
+  "title": "log/drill.jsonl の1行",
+  "description": "以前の択一ドリルの成績（1行1問）。いまは書き足さず、分析にだけ使う。",
+  "type": "object",
+  "required": [
+    "id",
+    "tags",
+    "score",
+    "max",
+    "graded_at"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "drill-<日時>-q<番号>"
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "drill"
+      ]
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]*$"
+      },
+      "minItems": 1,
+      "maxItems": 20,
+      "description": "分野タグ。先頭が主タグ"
+    },
+    "score": {
+      "type": "number",
+      "minimum": 0
+    },
+    "max": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "graded_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "タイムゾーン付きの ISO 8601（RFC 3339）"
+    },
+    "weak": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 50,
+      "description": "具体的な弱点（用語名や読み落とした観点）"
+    },
+    "miss_type": {
+      "type": "object",
+      "properties": {
+        "knowledge": {
+          "type": "number",
+          "minimum": 0
+        },
+        "reading": {
+          "type": "number",
+          "minimum": 0
+        },
+        "writing": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "description": "ミスの種類ごとの件数"
+    }
+  },
+  "additionalProperties": true
+}
