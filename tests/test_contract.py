@@ -102,6 +102,29 @@ class ServerLinesTest(unittest.TestCase):
             sets.answer_set_item(s["id"], it["id"], "ア")
         self.check("bank.jsonl", "bank-line")
 
+    def test_bank_fill(self):
+        from test_fill import add_fill
+        add_fill(self.tmp)
+        from unittest import mock
+        with mock.patch.dict(sets.SET_KINDS, {"fill": ("fill",)}):  # 1論点1問なので、穴埋めだけのセットを作る
+            s = sets.create_set(n=3, kind="fill")
+        it = next(x for x in s["items"] if x["kind"] == "fill")
+        with self.assertRaises(ValueError):
+            sets.answer_set_item(s["id"], it["id"], "仕入")  # 空欄ごとの辞書でない
+        with self.assertRaises(ValueError):
+            sets.answer_set_item(s["id"], it["id"], {"ア": "", "イ": ""})
+        s = sets.answer_set_item(s["id"], it["id"], {"ア": "仕入", "イ": "５０，０００円", "ウ": "売掛金"})
+        self.check("bank.jsonl", "bank-line")
+        r = jsonl(files.ROOT / "log" / "bank.jsonl")[-1]
+        self.assertEqual((r["kind"], r["score"], r["max"]), ("fill", 2, 3))
+        self.assertEqual(r["blanks"]["ウ"], {"answer": "売掛金", "ok": False})
+        v = next(x for x in sets.set_view(s)["items"] if x["id"] == it["id"])
+        self.assertEqual(v["blanks"], ["ア", "イ", "ウ"])
+        self.assertFalse(v["result"]["correct"])
+        self.assertIn("## 解説", v["key"]["body"])  # 答えたら正解と解説を出す
+        with self.assertRaises(RuntimeError):
+            sets.answer_set_item(s["id"], it["id"], {"ア": "仕入"})
+
     def test_bank_choice_unsure(self):
         """選択肢ごとの「不安」の印。選んだ答えに印があれば勘、ほかだけなら消去法、印なしは不明。"""
         s = sets.create_set(n=3, kind="choice")

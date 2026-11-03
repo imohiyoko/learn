@@ -47,7 +47,7 @@ MISS_ADVICE = {
 
 def load_rows(history_path=None, drill_path=None, bank_path=None):
     """記述式・択一・問題バンクのログを読み、kind（written / drill）を付けて時刻順に並べる。
-    バンクの択一は drill、短い記述は written として数える。"""
+    バンクの択一・穴埋めは drill、短い記述は written として数える。"""
     history_path = history_path or core.LOGS["history"][0]
     drill_path = drill_path or core.LOGS["drill"][0]
     bank_path = bank_path or Path(history_path).parent / "bank.jsonl"  # 記述式のログと同じフォルダ
@@ -56,7 +56,7 @@ def load_rows(history_path=None, drill_path=None, bank_path=None):
         for r in core.load_history(path):
             rows.append(dict(r, _kind=kind))
     for r in core.load_history(bank_path) if Path(bank_path).exists() else []:
-        rows.append(dict(r, _kind="drill" if r.get("kind") == "choice" else "written"))
+        rows.append(dict(r, _kind="drill" if r.get("kind") in ("choice", "fill") else "written"))
     rows.sort(key=sort_key)
     return rows
 

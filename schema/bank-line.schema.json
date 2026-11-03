@@ -33,6 +33,7 @@
       "type": "string",
       "enum": [
         "choice",
+        "fill",
         "short"
       ]
     },
@@ -69,7 +70,27 @@
     },
     "answer": {
       "type": "string",
-      "description": "択一で選んだ記号（サーバーが書く）"
+      "description": "択一で選んだ記号、穴埋めは「ア=現金 / イ=50000」のように空欄ごとの答えを並べたもの（サーバーが書く）"
+    },
+    "blanks": {
+      "type": "object",
+      "description": "穴埋めの空欄ごとの答えと正誤 {記号: {answer, ok}}（サーバーが書く）",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "answer",
+          "ok"
+        ],
+        "properties": {
+          "answer": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
     },
     "confidence": {
       "type": "string",

@@ -7,7 +7,7 @@ async function loadSets() {
   const { sets } = await api("/api/sets");
   const st = { open: "解いている途中", submitted: "採点中", graded: "レポートあり" };
   $("#sets-list").innerHTML = sets.length ? sets.map((s) => `<tr data-set="${esc(s.id)}"><td><a href="#">${esc(s.id)}</a></td>
-    <td>${esc(s.phase || "")}</td><td>択一 ${s.correct} / ${s.choices}</td><td>${st[s.status] || s.status}</td></tr>`).join("")
+    <td>${esc(s.phase || "")}</td><td>その場で採点 ${s.correct} / ${s.choices}</td><td>${st[s.status] || s.status}</td></tr>`).join("")
     : `<tr><td colspan="4" class="muted">まだセットを解いていません</td></tr>`;
 }
 

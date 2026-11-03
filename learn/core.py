@@ -84,6 +84,15 @@ def load_tags(path=PROFILE):
 DEFAULT_PASS = 0.6
 
 
+def has_section(path, title):
+    """profile に「## <title>」の節があるか（穴埋め問題など、使うかどうかを節のあるなしで決めるもの）"""
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return re.search(rf"^##\s*{re.escape(title)}\s*$", text, re.M) is not None
+
+
 def parse_pass_ratio(path=PROFILE):
     """「合格基準：100点満点中60点以上」「60%以上」などから合格ラインの得点率を読む。"""
     if not path.exists():

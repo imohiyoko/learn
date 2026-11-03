@@ -7,12 +7,12 @@ description: 問題バンクのセット（sets/<set>）を提出後にまとめ
 
 引数：`<set>`（例：`/grade-set set-20261110-120000`）。
 
-択一は、学習者が答えたその場でサーバーが採点し、`log/bank.jsonl` に記録済み。このスキルは短い記述を採点し、セット全体の解説と分析を書く。
+択一と穴埋めは、学習者が答えたその場でサーバーが採点し、`log/bank.jsonl` に記録済み。このスキルは短い記述を採点し、セット全体の解説と分析を書く。
 
 ## 手順
 
 1. **そろえる**
-   - `sets/<set>/set.json` を読む（`items`：問題と、選ばれた理由 `slot`・`reason`、`answers`：学習者の答え、`results`：択一の正誤）
+   - `sets/<set>/set.json` を読む（`items`：問題と、選ばれた理由 `slot`・`reason`、`answers`：学習者の答え、`results`：択一・穴埋めの正誤）
    - 問題は `bank/items/<id>.md`、正解・採点基準は `bank/keys/<id>.md`、記述の答えは `sets/<set>/answers/<id>.md`
    - `reports/<set>.md` がすでにあり、`log/bank.jsonl` にこのセットの記述の行もあれば、採点し直さずに「レポートはできています」とだけ返す
 2. **記述を採点する**（短い記述 `kind: short` ごとに）

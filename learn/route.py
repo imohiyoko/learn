@@ -5,7 +5,7 @@ Claude がその場で分野を選ぶと、選び方が毎回ぶれて苦手を�
 論点ごとの力を見積もり、決まった規則で問題を選ぶ（同じ記録からは同じセットになる）。
 
 使い方:
-  python3 scripts/route.py                   次のセット（択一と短い記述、10問）を表示
+  python3 scripts/route.py                   次のセット（択一・穴埋め・短い記述、10問）を表示
   python3 scripts/route.py --n 6 --tag <タグ>   分野をしぼる
   python3 scripts/route.py --kinds long      本番形式の長い記述を1問選ぶ（/question が使う）
   python3 scripts/route.py --model           論点ごとの見込みを表示
@@ -46,7 +46,7 @@ from learn.model import V_INIT, elo_update, logit, sigmoid
 ROOT = core.ROOT
 V_MEASURED = 0.45            # v がこれ以下になったら「測れた」とみなす
 DIFF_B = {1: -0.8, 2: 0.0, 3: 0.8}
-KIND_WEIGHT = {"choice": 1.0, "short": 1.5, "long": 1.0}
+KIND_WEIGHT = {"choice": 1.0, "fill": 1.0, "short": 1.5, "long": 1.0}
 # 択一の確信度（自己申告）で、その1問が見込みを動かす強さを変える。ない行は 1.0（不明）。
 # ○でも勘・消去法なら理解の証拠として弱く、根拠があると思って×なら思い込みとして強く効かせる。
 CONF_WEIGHT_RIGHT = {"sure": 1.0, "narrowed": 0.6, "guess": 0.3}
@@ -56,6 +56,7 @@ RETRY_DAYS = (1, 3, 7)       # 間違えた回数ごとの、やり直すまで�
 REVIEW_AFTER_DAYS = 7        # 得意な論点を確認に出すまでの日数
 STRONG_MARGIN = 0.15
 STOCK_TARGET = {"choice": 3, "short": 1}   # 論点ごとに用意する数
+FILL_TARGET = 2                            # exam/profile.md に「## 穴埋め問題」の節があれば、論点ごとに用意する穴埋めの数
 LONG_PER_TAG = 1                           # 分野ごとに用意する本番形式の長文の数
 CONCEPT_RE = re.compile(r"^[a-z][a-z0-9_-]*/[a-z0-9][a-z0-9_-]*$")
 ITEM_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
@@ -212,7 +213,7 @@ def tag_weights(p):
     return {t: w for t, (_, w) in core.load_tags(p["profile"]).items()}
 
 
-def route(root=None, n=10, kinds=("choice", "short"), tag=None, now=None, pass_ratio=DEFAULT_PASS, exclude=()):
+def route(root=None, n=10, kinds=("choice", "fill", "short"), tag=None, now=None, pass_ratio=DEFAULT_PASS, exclude=()):
     """次のセットを返す：{"items": [{id, kind, concepts, slot, reason}], "shortage": [...], "phase": ...}"""
     p = paths(root)
     now = now or datetime.now(timezone.utc).astimezone()
@@ -247,7 +248,8 @@ def route(root=None, n=10, kinds=("choice", "short"), tag=None, now=None, pass_r
         if not cands:
             return None
         return min(cands, key=lambda it: (abs(DIFF_B[it["difficulty"]] - target_b),
-                                          {"choice": 0, "short": 1, "long": 2}[it["kind"]], it["id"]))
+                                          # 難しさが同じなら、勘で当たらない穴埋めを先に
+                                          {"fill": 0, "choice": 1, "short": 2, "long": 3}[it["kind"]], it["id"]))
 
     measured = [c for c in view if view[c]["status"] not in ("未出題", "測定中")]
     ratio_measured = len(measured) / len(view) if view else 1.0
@@ -348,9 +350,12 @@ def stock(root=None):
             have[it["concepts"][0]][it["kind"]] += 1
     long_have = Counter(it["tags"][0] for it in all_items.values()
                         if it["kind"] == "long" and it["tags"] and not it["issued"])
+    target = dict(STOCK_TARGET)
+    if core.has_section(p["profile"], "穴埋め問題"):
+        target["fill"] = FILL_TARGET
     rows = []
     for c, info in concepts.items():
-        need = {k: max(0, v - have[c][k]) for k, v in STOCK_TARGET.items()}
+        need = {k: max(0, v - have[c][k]) for k, v in target.items()}
         rows.append({"concept": c, "tag": info["tag"], "name": info["name"], "have": dict(have[c]), "need": need})
     tags = sorted({info["tag"] for info in concepts.values()})
     long_rows = [{"tag": t, "have": long_have[t], "need": max(0, LONG_PER_TAG - long_have[t])} for t in tags]
@@ -391,7 +396,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--n", type=int, default=None, help="問題数（既定：10。--kinds long なら 1）")
     ap.add_argument("--tag")
-    ap.add_argument("--kinds", default="choice,short", help="choice,short,long のどれか（カンマ区切り）")
+    ap.add_argument("--kinds", default="choice,fill,short", help="choice,fill,short,long のどれか（カンマ区切り）")
     ap.add_argument("--model", action="store_true")
     ap.add_argument("--stock", action="store_true")
     ap.add_argument("--compare", metavar="SET")

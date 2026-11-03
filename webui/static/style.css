@@ -165,6 +165,13 @@ body:has(.timer:not([hidden])) main { padding-bottom: 72px; }
 .options button.right { border: 2px solid var(--strong); }
 .options button.wrong { border: 2px solid var(--weak); }
 .options button:disabled { opacity: 1; cursor: default; }
+.fill { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.fill .fill-row { display: flex; gap: 8px; align-items: center; }
+.fill .fill-row .lbl { font-weight: 700; min-width: 2.5em; }
+.fill .fill-row input { flex: 1; min-width: 0; }
+.fill .mark { font-weight: 700; min-width: 1.5em; text-align: center; }
+.fill .mark.ok { color: var(--strong); }
+.fill .mark.ng { color: var(--weak); }
 .options .opt-row { display: flex; gap: 6px; align-items: stretch; }
 .options .opt-row > [data-opt] { flex: 1; }
 .options button.unsure { flex: none; justify-content: center; align-items: center; padding: 0 12px; font-weight: 700; color: var(--muted); }
