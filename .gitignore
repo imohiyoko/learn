@@ -32,3 +32,6 @@ archive/
 
 .DS_Store
 __pycache__/
+
+# web UI から Claude Code への依頼（/inbox で処理）
+/inbox/
