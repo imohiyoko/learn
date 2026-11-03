@@ -3,7 +3,7 @@
 Claude Code で記述式問題の「出題 → 解答 → 採点 → 弱点更新」を回す、学習用の雛形リポジトリです。
 試験ごとに `exam/profile.md` を差し替えれば、どの資格にも使えます。サンプルとして情報処理安全確保支援士（科目B）の設定を同梱しています。
 
-必要なのは [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) と Python 3（成績集計用、標準ライブラリのみ）だけです。サーバーやアカウント登録は要りません。
+必要なのは [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) と Python 3（成績集計用、標準ライブラリのみ）だけです。サーバーやアカウント登録は要りません。ターミナルの代わりに[ブラウザから使う](#ブラウザから使うセルフホスト)こともできます。
 
 ## しくみ
 
@@ -40,6 +40,54 @@ Claude Code で記述式問題の「出題 → 解答 → 採点 → 弱点更�
 - `refs/` と `past-*`：公式過去問など著作物の転記
 
 フォルダ構造を保つための `.gitkeep` と、`refs/README.md`（置く資料の説明）だけが追跡されています。別の端末でも学習を続けたい場合は、このリポジトリをテンプレートとして **private** リポジトリを作り、`.gitignore` の該当行を外して使ってください。`refs/` と `past-*` は公式資料の転記を含むので、private でも外さないことをおすすめします。
+
+## ブラウザから使う（セルフホスト）
+
+ターミナルを開かずに、ブラウザで学習の種類・分野・問題数を選んで回せます。自分の PC で動かすだけで、アカウント登録やデータベースは要りません。
+
+```bash
+python3 webui/server.py      # → http://127.0.0.1:8765/
+```
+
+- **学習する**：記述式 / 択一ドリル / 取り込んだ過去問 / 過去問の取り込み / 振り返り を選び、分野（おまかせ＝弱点から自動）と問題数を指定して「はじめる」。問題は画面に表示され、記述式は解答欄に書いて「保存して採点する」、択一は返信欄に `1ア 2ウ …` で答えます
+- **成績**：`scripts/analyze.py` と同じ得意・不得意の判定を表で表示（Claude を呼ばないので無料・一瞬）
+- **履歴**：出題済みの問題・解答・講評を見返す（採点基準 `rubrics/` は画面から読めません）
+- **設定**：`examples/` のサンプルをコピー、または Claude と対話して試験を設定。`exam/profile.md` を画面で編集
+
+しくみは単純で、画面で選んだ内容を `claude -p "/drill web 5"` のようにして**このリポジトリのスキルをそのまま呼んでいる**だけです。出題・検証・採点のルールも、記録されるファイル（`questions/` `log/` など）も、ターミナルで使うときと同じなので、両方を行き来できます。
+
+- 必要なもの：Python 3（標準ライブラリのみ）と、ログイン済みの [Claude Code](https://docs.claude.com/en/docs/claude-code/overview)（Pro / Max のサブスクリプションか API キー）
+- `claude -p` は対話で許可を求められないので、スキルが使う操作（このフォルダ内のファイル編集と `scripts/` の実行など）だけを許可して動かします（`webui/server.py` の `ALLOWED_TOOLS`）
+- サブエージェント（verifier・grader）の出力や、採点基準を書き込む操作の中身は画面に流しません
+- 同時に動かせる作業は1つだけです。問題の作成には数分かかります
+- 使うモデルを変えたいときは `LEARN_CLAUDE_ARGS="--model sonnet" python3 webui/server.py`
+
+### スマホなど別の端末から使う
+
+既定では自分の PC（127.0.0.1）からしか開けません。同じ LAN の端末から使うときはトークンを決めて起動し、`?token=` 付きの URL を一度開きます（以後は Cookie で覚えます）。
+
+```bash
+LEARN_TOKEN=好きな長い文字列 python3 webui/server.py --host 0.0.0.0
+# → http://<PCのIPアドレス>:8765/?token=好きな長い文字列
+```
+
+インターネットに直接公開する使い方は想定していません。外から使いたいときは Tailscale などの VPN 越しにしてください。
+
+### Docker で動かす
+
+Python や Claude Code をホストに入れたくない場合は Docker でも動きます。このフォルダをそのままマウントするので、学習データはホスト側に残ります。
+
+```bash
+cp .env.example .env    # CLAUDE_CODE_OAUTH_TOKEN（`claude setup-token` で発行）か ANTHROPIC_API_KEY を書く
+docker compose up -d    # → http://127.0.0.1:8765/
+```
+
+- コンテナは uid 1000 のユーザーで動きます。ホストのユーザーが uid 1000 でない場合は、`compose.yaml` に `user: "<uid>:<gid>"` を足してください
+- 別の端末から使うときは `compose.yaml` の `ports` を `"8765:8765"` にして、`.env` に `LEARN_TOKEN` を設定します
+
+### SaaS 版との違い
+
+[imohiyoko/learning](https://github.com/imohiyoko/learning) は複数人で使うホスト型のサービスです。こちらは「1人・自分の PC・ファイルだけ」の雛形のまま、操作だけをブラウザでできるようにしたもので、アカウント・データベース・概念辞書・記憶（FSRS）などは持ちません。
 
 ## コマンド
 
@@ -128,6 +176,8 @@ Claude Code で記述式問題の「出題 → 解答 → 採点 → 弱点更�
 ├ templates/              # プロファイル・問題・採点基準・解答・結果・ログのひな形
 ├ scripts/stats.py        # 成績集計と出題分野の推薦（Python標準ライブラリのみ）
 ├ scripts/analyze.py      # 得意・不得意の分析（記述式と択一を合わせて）
+├ webui/                  # ブラウザから使うためのローカルサーバーと画面（python3 webui/server.py）
+├ Dockerfile compose.yaml # Docker で動かすとき
 ├ tests/                  # スクリプトのテスト（python3 -m unittest discover -s tests）
 ├ questions/ rubrics/ answers/ results/
 ├ questions/assets/       # 問題の図（画像・SVG）

@@ -1,0 +1,24 @@
+# docker compose up -d で http://127.0.0.1:8765/ に立ち上がる。
+# Claude Code の認証は .env に書く（.env.example を参照）。
+services:
+  learn:
+    build: .
+    image: learn-webui
+    ports:
+      # 自分の PC からだけ開けるようにしている。スマホなど別の端末から使うなら
+      # "8765:8765" にして、.env の LEARN_TOKEN を必ず設定する
+      - "127.0.0.1:8765:8765"
+    volumes:
+      # このフォルダ（スキル・スクリプト・学習データ）をそのまま使う
+      - .:/learn
+      # Claude Code の設定・会話の履歴（コンテナを作り直しても残す）
+      - claude-home:/home/node
+    env_file:
+      - path: .env
+        required: false
+    # ポートは 127.0.0.1 にしか出していないので、トークンなしでも待ち受けられるようにしている
+    command: ["python3", "webui/server.py", "--allow-no-token"]
+    restart: unless-stopped
+
+volumes:
+  claude-home:

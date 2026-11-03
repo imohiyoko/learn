@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>learn</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>learn</h1>
+  <span id="exam" class="muted"></span>
+  <nav>
+    <button data-tab="study" class="active">学習する</button>
+    <button data-tab="stats">成績</button>
+    <button data-tab="history">履歴</button>
+    <button data-tab="settings">設定</button>
+  </nav>
+</header>
+
+<main>
+  <div id="notice" class="notice" hidden></div>
+
+  <!-- 学習する -->
+  <section id="tab-study" class="tab">
+    <form id="start" class="card">
+      <fieldset class="kinds">
+        <legend>学習の種類</legend>
+        <label><input type="radio" name="action" value="question" checked> 記述式を1問</label>
+        <label><input type="radio" name="action" value="drill"> 択一ドリル</label>
+        <label><input type="radio" name="action" value="past"> 取り込んだ過去問</label>
+        <label><input type="radio" name="action" value="import"> 過去問を取り込む</label>
+        <label><input type="radio" name="action" value="review"> 振り返り</label>
+      </fieldset>
+      <div class="row" data-for="question drill">
+        <label>分野
+          <select name="tag" id="tag-select"></select>
+        </label>
+        <label data-for="drill">問題数
+          <input type="number" name="count" id="drill-count" min="1" max="50">
+        </label>
+      </div>
+      <div class="row" data-for="past">
+        <label>過去問
+          <select name="past" id="past-select"></select>
+        </label>
+      </div>
+      <div class="row" data-for="import">
+        <label>年度 <input name="year" placeholder="r06a" size="8"></label>
+        <label>問番号 <input name="q" placeholder="q1" size="6"></label>
+        <span class="muted small">refs/ に問題冊子と解答例を置いてから</span>
+      </div>
+      <p id="rec" class="muted small"></p>
+      <button type="submit" class="primary" id="start-btn">はじめる</button>
+    </form>
+
+    <div id="work" hidden>
+      <div class="card" id="question-card" hidden>
+        <div class="card-head">
+          <h2 id="question-title"></h2>
+          <span id="question-meta" class="muted small"></span>
+        </div>
+        <div id="question-body" class="md"></div>
+        <div id="answer-box" hidden>
+          <h3>解答</h3>
+          <textarea id="answer-text" rows="14" spellcheck="false"></textarea>
+          <div class="row">
+            <button id="save-answer">保存</button>
+            <button id="grade-btn" class="primary">保存して採点する</button>
+            <span id="answer-status" class="muted small"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" id="session">
+        <div class="card-head">
+          <h2 id="session-title"></h2>
+          <span id="session-status" class="muted small"></span>
+          <button id="stop-btn" class="small" hidden>止める</button>
+        </div>
+        <div id="log"></div>
+        <form id="reply" class="row">
+          <textarea id="reply-text" rows="2" placeholder="返信（択一ドリルの答えは「1ア 2ウ 3エ …」）"></textarea>
+          <button type="submit" class="primary">送る</button>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- 成績 -->
+  <section id="tab-stats" class="tab" hidden>
+    <div class="card"><div id="stats-body"></div></div>
+  </section>
+
+  <!-- 履歴 -->
+  <section id="tab-history" class="tab" hidden>
+    <div class="card">
+      <table class="list"><thead><tr><th>問題</th><th>種類</th><th>分野</th><th>結果</th></tr></thead><tbody id="items"></tbody></table>
+    </div>
+    <div class="card" id="viewer" hidden>
+      <div class="card-head">
+        <h2 id="viewer-title"></h2>
+        <span class="tabs-inline" id="viewer-tabs"></span>
+      </div>
+      <div id="viewer-body" class="md"></div>
+    </div>
+  </section>
+
+  <!-- 設定 -->
+  <section id="tab-settings" class="tab" hidden>
+    <div class="card" id="setup-card">
+      <h2>試験を選ぶ</h2>
+      <p class="muted small">サンプルの設定をコピーするか、Claude と対話して作ります（<code>/setup-exam</code>）。</p>
+      <div class="row">
+        <select id="example-select"></select>
+        <button id="copy-example">この設定を使う</button>
+        <button id="setup-chat">対話で設定する</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>試験プロファイル <code class="small">exam/profile.md</code></h2>
+      <p class="muted small">分野タグ・合格基準・択一の問題数などはここで直せます。</p>
+      <textarea id="profile-text" rows="24" spellcheck="false"></textarea>
+      <div class="row"><button id="save-profile" class="primary">保存</button><span id="profile-status" class="muted small"></span></div>
+    </div>
+  </section>
+</main>
+
+<script src="md.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

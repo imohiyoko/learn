@@ -32,3 +32,6 @@ archive/
 
 .DS_Store
 __pycache__/
+
+# Docker で使う認証情報
+.env
