@@ -295,5 +295,49 @@ class WebUITest(unittest.TestCase):
             prof.write_text(saved, encoding="utf-8")
 
 
+    def upload(self, query, data, headers=None):
+        h = {"X-Learn": "1", "Content-Type": "application/octet-stream"}
+        h.update(headers or {})
+        req = urllib.request.Request(self.base + "/api/refs?" + query, data=data, method="POST", headers=h)
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.status, json.loads(r.read() or b"{}")
+        except urllib.error.HTTPError as e:
+            with e:
+                return e.code, json.loads(e.read() or b"{}")
+
+    def test_08_refs_upload(self):
+        from urllib.parse import quote
+        name = quote("r06a 午後 q1.pdf")
+        code, r = self.upload(f"dir=past&name={name}", b"%PDF-1.4 test")
+        self.assertEqual(code, 200, r)
+        self.assertEqual((self.tmp / "refs" / "past" / "r06a 午後 q1.pdf").read_bytes(), b"%PDF-1.4 test")
+        # 同じ名前は、上書きを指定しない限り断る
+        code, _ = self.upload(f"dir=past&name={name}", b"other")
+        self.assertEqual(code, 409)
+        code, _ = self.upload(f"dir=past&name={name}&overwrite=1", b"%PDF-1.5")
+        self.assertEqual(code, 200)
+        _, r = self.call("/api/refs")
+        self.assertEqual([x["path"] for x in r["refs"]], ["past/r06a 午後 q1.pdf"])
+        # フォルダの外・使えない種類・空・独自ヘッダーなしは断る
+        for q in ("dir=past&name=..%2Fx.pdf", "dir=..&name=x.pdf", "dir=past&name=x.exe", "dir=past&name=.x.pdf"):
+            code, _ = self.upload(q, b"x")
+            self.assertEqual(code, 400, q)
+        code, _ = self.upload("dir=past&name=empty.pdf", b"")
+        self.assertEqual(code, 400)
+        code, _ = self.upload("dir=past&name=y.pdf", b"x", {"X-Learn": "0"})
+        self.assertEqual(code, 403)
+        self.assertFalse((self.tmp / "x.pdf").exists())
+        self.assertFalse((self.tmp / "refs" / "past" / "y.pdf").exists())
+
+    def test_09_setup_exam_name(self):
+        b = server.build_prompt
+        self.assertEqual(b({"action": "setup", "exam": "応用情報技術者試験"})[0], "/setup-exam 応用情報技術者試験")
+        self.assertEqual(b({"action": "setup"})[0], "/setup-exam")
+        for bad in ("/review", "a\nb", "x" * 61):
+            with self.assertRaises(ValueError):
+                b({"action": "setup", "exam": bad})
+
+
 if __name__ == "__main__":
     unittest.main()

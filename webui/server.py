@@ -59,8 +59,9 @@ PAST_RE = re.compile(r"^[a-z0-9]+$")
 
 def configure(root):
     """学習データを置くフォルダを決める（テストでは一時フォルダにする）。"""
-    global ROOT, PROFILE, EXAMPLES, ASSETS, LOGS, VIEWABLE
+    global ROOT, PROFILE, EXAMPLES, ASSETS, LOGS, VIEWABLE, REFS
     ROOT = Path(root).resolve()
+    REFS = ROOT / "refs"
     PROFILE = ROOT / "exam" / "profile.md"
     EXAMPLES = ROOT / "examples"
     ASSETS = ROOT / "questions" / "assets"
@@ -257,6 +258,12 @@ def build_prompt(body):
             raise ValueError("年度と問番号は英小文字と数字で（例：r06a q1）")
         return f"/import-past {year} {q}", f"過去問の取り込み {year} {q}"
     if action == "setup":
+        # 勉強したい資格の名前（任意）。1行の短い名前だけ受け付ける
+        exam = str(body.get("exam") or "").strip()
+        if exam:
+            if len(exam) > 60 or exam.startswith("/") or re.search(r"[\x00-\x1f\x7f]", exam):
+                raise ValueError("資格の名前は60字以内の1行で書いてください")
+            return f"/setup-exam {exam}", f"試験の設定 {exam}"
         return "/setup-exam", "試験の設定"
     raise ValueError("不明な操作です")
 
@@ -609,6 +616,66 @@ CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; c
                  ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp"}
 
 
+# ---------------------------------------------------------------- 資料（refs/）のアップロード
+
+REF_EXTS = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".txt", ".md"}
+REF_MAX = 50 * 1024 * 1024
+REF_DIRS = ("past", "syllabus", "other")  # refs/ の下に置くフォルダ（refs/README.md のおすすめに合わせる）
+
+
+def ref_name(name):
+    """アップロードされたファイル名を、refs/<dir>/ の直下に置ける名前にする。だめなら None。"""
+    name = (name or "").strip()
+    if (not name or len(name) > 120 or name.startswith(".") or "/" in name or "\\" in name
+            or re.search(r"[\x00-\x1f\x7f]", name) or Path(name).suffix.lower() not in REF_EXTS):
+        return None
+    return name
+
+
+def list_refs():
+    if not REFS.is_dir():
+        return []
+    out = []
+    for p in REFS.rglob("*"):
+        rel = p.relative_to(REFS)
+        if not p.is_file() or rel.name == "README.md" or any(s.startswith(".") for s in rel.parts):
+            continue
+        st = p.stat()
+        out.append({"path": rel.as_posix(), "size": st.st_size, "mtime": st.st_mtime})
+    return sorted(out, key=lambda x: x["mtime"], reverse=True)
+
+
+def save_ref(folder, name, read, size, overwrite=False):
+    if folder not in REF_DIRS:
+        raise ValueError("置き場所が正しくありません")
+    name = ref_name(name)
+    if not name:
+        raise ValueError("ファイル名が使えません（PDF・画像・テキストだけ。120字以内）")
+    if size <= 0:
+        raise ValueError("空のファイルです")
+    if size > REF_MAX:
+        raise ValueError("ファイルが大きすぎます（50MB まで）")
+    d = REFS / folder
+    d.mkdir(parents=True, exist_ok=True)
+    dest = d / name
+    if dest.exists() and not overwrite:
+        raise FileExistsError(f"refs/{folder}/{name} はすでにあります")
+    tmp = d / f".{name}.{uuid.uuid4().hex[:6]}.part"
+    try:
+        with open(tmp, "wb") as f:
+            left = size
+            while left:
+                chunk = read(min(left, 1 << 20))
+                if not chunk:
+                    raise ValueError("アップロードが途中で切れました")
+                f.write(chunk)
+                left -= len(chunk)
+        os.replace(tmp, dest)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return f"{folder}/{name}"
+
+
 def safe_child(base, name):
     """base 直下のファイルだけを返す（../ などで外に出させない）。"""
     if not ID_RE.match(name):
@@ -736,6 +803,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"text": PROFILE.read_text(encoding="utf-8") if PROFILE.exists() else None})
             if path == "/api/jobs":
                 return self.send_json({"jobs": self.jobs.list()})
+            if path == "/api/refs":
+                return self.send_json({"refs": list_refs(), "dirs": list(REF_DIRS)})
             m = re.match(r"^/api/jobs/([0-9a-z-]+)$", path)
             if m:
                 r = self.jobs.events(m.group(1), int(q.get("after", 0)), min(float(q.get("wait", 0) or 0), 30))
@@ -755,7 +824,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.guard(write=True):
             return
-        path = urlparse(self.path).path
+        url = urlparse(self.path)
+        path = url.path
+        if path == "/api/refs":
+            return self.upload_ref({k: v[0] for k, v in parse_qs(url.query).items()})
         try:
             body = self.body()
             if path == "/api/run":
@@ -794,6 +866,27 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             return self.error(500, f"{type(e).__name__}: {e}")
         return self.error(404, "not found")
+
+    def upload_ref(self, q):
+        """POST /api/refs?dir=past&name=<ファイル名>[&overwrite=1]。本文はファイルの中身そのまま"""
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            n = 0
+        try:
+            if n > REF_MAX:
+                self.close_connection = True  # 読まずに断るので、残りの本文で次の要求を壊さない
+            saved = save_ref(q.get("dir", "past"), q.get("name", ""), self.rfile.read, n, q.get("overwrite") == "1")
+            return self.send_json({"ok": True, "path": saved})
+        except FileExistsError as e:
+            self.close_connection = True
+            return self.error(409, str(e))
+        except ValueError as e:
+            self.close_connection = True
+            return self.error(400, str(e))
+        except Exception as e:
+            self.close_connection = True
+            return self.error(500, f"{type(e).__name__}: {e}")
 
     def do_PUT(self):
         if not self.guard(write=True):

@@ -110,8 +110,36 @@ table.list tr[data-id]:hover { background: var(--user); }
 .st-得意 .badge { background: var(--strong); color: var(--card); }
 .tabs-inline { display: flex; gap: 4px; margin-left: auto; }
 .tabs-inline button.active { background: var(--accent); color: var(--accent-fg); }
+.ans-field { margin: 0 0 12px; }
+.ans-field .ans-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.ans-field .ans-prompt { font-size: 13px; color: var(--muted); }
+.ans-field textarea { font-family: inherit; font-size: 15px; }
+.ans-count { text-align: right; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ans-count.near { color: var(--border); }
+.ans-count.over { color: var(--weak); font-weight: 600; }
+.ans-field:has(.ans-count.over) textarea { border-color: var(--weak); }
+#ask-box { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 8px; }
+#ask-box summary { cursor: pointer; color: var(--accent); }
 @media (max-width: 600px) {
   main { padding: 12px; }
   nav { margin-left: 0; width: 100%; }
   .msg.user { max-width: 95%; }
 }
+.tag-grid, .exam-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+.tag-card, .exam-card { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+.tag-card .row { margin: 4px 0 0; gap: 6px; }
+.tag-card.st-苦手 { border-left: 4px solid var(--weak); }
+.tag-card.st-ボーダー { border-left: 4px solid var(--border); }
+.tag-card.st-得意 { border-left: 4px solid var(--strong); }
+.exam-card { flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; }
+.exam-card.current { border-color: var(--accent); }
+#home-setup input { flex: 1 1 260px; }
+.dropzone { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 20px; margin: 8px 0;
+  border: 2px dashed var(--line); border-radius: 10px; cursor: pointer; text-align: center; color: var(--muted); }
+.dropzone.over { border-color: var(--accent); background: var(--user); }
+.dropzone input { max-width: 100%; }
+.timer { position: fixed; right: 16px; bottom: 16px; z-index: 2; display: flex; align-items: center; gap: 8px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 6px 8px 6px 14px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .15); font-variant-numeric: tabular-nums; }
+.timer.over { border-color: var(--weak); color: var(--weak); font-weight: 600; }
+body:has(.timer:not([hidden])) main { padding-bottom: 72px; }

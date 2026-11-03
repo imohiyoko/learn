@@ -53,9 +53,12 @@
     $$("nav button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
     $$(".tab").forEach((t) => (t.hidden = t.id !== "tab-" + name));
     try { localStorage.setItem("learn.tab", name); } catch (e) {}
+    if (name === "home") loadHome().catch((e) => notice(esc(e.message), "error"));
     if (name === "stats") loadStats();
     if (name === "history") loadItems();
+    if (name === "refs") loadRefs().catch((e) => notice(esc(e.message), "error"));
     if (name === "settings") loadProfile();
+    timerRender();
   }
   $$("nav button").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
 
@@ -65,7 +68,7 @@
     $("#exam").textContent = S.exam || "";
     if (S.profile !== "ok") {
       notice(S.profile === "missing"
-        ? "まだ試験が設定されていません。<a href=\"#\" data-go=\"settings\">設定</a>から選んでください。"
+        ? "まだ資格が選ばれていません。<a href=\"#\" data-go=\"home\">ホーム</a>の「資格を選ぶ」から選んでください。"
         : "<code>exam/profile.md</code> に TODO が残っています。<a href=\"#\" data-go=\"settings\">設定</a>で埋めてください。", "warn");
     } else if (S.runner === "cli" && !S.claude) {
       notice("Claude Code（<code>claude</code> コマンド）が見つかりません。出題・採点には Claude Code のインストールとログインが必要です。", "warn");
@@ -128,14 +131,148 @@
       const r = await api("/api/run", { method: "POST", body });
       openJob(r.job);
       showTab("study");
+      window.scrollTo({ top: 0 });
     } catch (err) { notice(esc(err.message), "error"); }
   }
+
+  // ---------------------------------------------------------- ホーム
+  const STATUS_ORDER = { "苦手": 0, "ボーダー": 1, "測定中": 2, "未出題": 3, "得意": 4 };
+
+  async function loadHome() {
+    if (!S) return;
+    const ok = S.profile === "ok";
+    $("#home-exam-name").textContent = ok ? S.exam || "いまの資格" : "まだ資格が選ばれていません";
+    $("#home-actions").hidden = !ok;
+    $("#home-tags-card").hidden = !ok;
+    $("#home-rec").textContent = ok && S.recommend.written.length
+      ? "おすすめの分野：" + S.recommend.written.map((r) => `${r.name}（${r.reason}）`).join("、") : "";
+    renderExamples();
+    if (!ok) { $("#home-summary").textContent = "下の「資格を選ぶ」から始めてください"; $("#home-continue").innerHTML = ""; return; }
+
+    const [{ analysis: a }, { items }, { jobs }] = await Promise.all([api("/api/analysis"), api("/api/items"), api("/api/jobs")]);
+    $("#home-summary").textContent = a
+      ? `記述 ${a.attempts.written}回（平均 ${pct(a.overall.written_avg)}）・択一 ${a.attempts.drill}問（正答率 ${pct(a.overall.drill_avg)}）・合格ライン ${pct(a.pass_ratio)}` : "";
+
+    // 書きかけ（解答はあるが未採点）の問題。出題した会話が残っていれば、そこから続ける
+    const open = items.filter((x) => x.kind === "written" && !x.graded)
+      .map((x) => ({ x, j: jobs.find((j) => (j.question_ids || []).includes(x.id)) }))
+      .filter((o) => o.j).slice(0, 3);
+    $("#home-continue").innerHTML = open.length
+      ? `<h3>続きから</h3><div class="row">${open.map((o) => `<button data-job="${esc(o.j.id)}">${esc(o.x.id)}${o.x.has_answer ? "（書きかけ）" : ""}</button>`).join("")}</div>` : "";
+
+    const tags = S.tags.map((t) => ({ ...t, a: (a && a.tags[t.tag]) || {} }))
+      .sort((x, y) => (STATUS_ORDER[x.a.status] ?? 2) - (STATUS_ORDER[y.a.status] ?? 2) || y.weight - x.weight);
+    $("#home-tags").innerHTML = tags.map((t) => `<div class="tag-card st-${esc(t.a.status || "")}">
+        <div><b>${esc(t.name)}</b> <span class="muted small">${esc(t.tag)}</span></div>
+        <div class="small">${t.a.status ? `<span class="badge">${esc(t.a.status)}</span> ` : ""}<span class="muted">記述 ${pct(t.a.written && t.a.written.p)}・択一 ${pct(t.a.drill && t.a.drill.p)}</span></div>
+        <div class="row"><button class="small" data-start="question" data-tag="${esc(t.tag)}">記述を1問</button><button class="small" data-start="drill" data-tag="${esc(t.tag)}">択一</button></div>
+      </div>`).join("");
+  }
+
+  function renderExamples() {
+    $("#home-examples").innerHTML = S.examples.map((e) => {
+      const cur = S.profile === "ok" && S.exam === e.name;
+      return `<div class="exam-card${cur ? " current" : ""}"><b>${esc(e.name)}</b>
+        ${cur ? `<span class="badge">勉強中</span>` : `<button class="small" data-example="${esc(e.key)}">この資格で勉強する</button>`}</div>`;
+    }).join("") || `<p class="muted small">用意してある資格はまだありません。</p>`;
+  }
+
+  document.addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-start], [data-example], [data-job]");
+    if (!b) return;
+    e.preventDefault();
+    if (b.dataset.start) return start({ action: b.dataset.start, tag: b.dataset.tag || "" });
+    if (b.dataset.example) return useExample(b.dataset.example);
+    if (b.dataset.job) {
+      try {
+        const { jobs } = await api("/api/jobs");
+        const j = jobs.find((x) => x.id === b.dataset.job);
+        if (!j) return notice("この会話はもうありません", "warn");
+        openJob(j);
+        showTab("study");
+      } catch (err) { notice(esc(err.message), "error"); }
+    }
+  });
+
+  $("#home-setup").addEventListener("submit", (e) => {
+    e.preventDefault();
+    start({ action: "setup", exam: e.target.exam.value.trim() });
+  });
+
+  // ---------------------------------------------------------- 資料（refs/）
+  const size = (n) => (n >= 1 << 20 ? (n / (1 << 20)).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB");
+
+  async function loadRefs() {
+    const { refs } = await api("/api/refs");
+    $("#refs-list").innerHTML = refs.length ? refs.map((r) => `<tr><td>${esc(r.path)}</td><td>${size(r.size)}</td>
+      <td class="small">${new Date(r.mtime * 1000).toLocaleString()}</td></tr>`).join("")
+      : `<tr><td colspan="3" class="muted">まだありません</td></tr>`;
+  }
+
+  async function uploadOne(dir, file, overwrite) {
+    const q = `dir=${encodeURIComponent(dir)}&name=${encodeURIComponent(file.name)}` + (overwrite ? "&overwrite=1" : "");
+    const r = await fetch("/api/refs?" + q, { method: "POST", headers: { "X-Learn": "1", "Content-Type": "application/octet-stream" }, body: file });
+    const data = await r.json().catch(() => ({}));
+    if (r.status === 409 && !overwrite) {
+      if (confirm(`${file.name} はすでにあります。上書きしますか？`)) return uploadOne(dir, file, true);
+      return null;
+    }
+    if (!r.ok) throw new Error(`${file.name}：${data.error || r.statusText}`);
+    return data.path;
+  }
+
+  $("#upload").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const files = Array.from(f.files.files);
+    if (!files.length) return notice("ファイルを選んでください", "warn");
+    const btn = f.querySelector("button[type=submit]");
+    btn.disabled = true;
+    const done = [];
+    try {
+      for (const [i, file] of files.entries()) {
+        $("#upload-status").textContent = `アップロード中… ${i + 1} / ${files.length}`;
+        const p = await uploadOne(f.dir.value, file);
+        if (p) done.push(p);
+      }
+      f.files.value = "";
+      $("#dropzone span").textContent = "ここにファイルをドロップ、またはクリックして選ぶ（50MB まで）";
+      $("#upload-status").textContent = done.length ? `保存しました：${done.join("、")}` : "";
+    } catch (err) {
+      $("#upload-status").textContent = done.length ? `保存しました：${done.join("、")}` : "";
+      notice(esc(err.message), "error");
+    } finally {
+      btn.disabled = false;
+      loadRefs().catch(() => {});
+    }
+  });
+
+  const dz = $("#dropzone");
+  const showPicked = () => {
+    const fs = Array.from($("#upload").files.files);
+    dz.querySelector("span").textContent = fs.length ? fs.map((x) => `${x.name}（${size(x.size)}）`).join("、") : "ここにファイルをドロップ、またはクリックして選ぶ（50MB まで）";
+  };
+  $("#upload").files.addEventListener("change", showPicked);
+  dz.addEventListener("dragover", (e) => { e.preventDefault(); dz.classList.add("over"); });
+  dz.addEventListener("dragleave", () => dz.classList.remove("over"));
+  dz.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dz.classList.remove("over");
+    $("#upload").files.files = e.dataTransfer.files;
+    showPicked();
+  });
+
+  $("#import-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    start({ action: "import", year: e.target.year.value.trim(), q: e.target.q.value.trim() });
+  });
 
   // ---------------------------------------------------------- 会話
   function openJob(j) {
     job = j;
     seq = 0;
     currentQ = null;
+    timerSet(null);
     $("#log").innerHTML = "";
     $("#work").hidden = false;
     $("#question-card").hidden = true;
@@ -154,6 +291,7 @@
     $("#session-status").classList.toggle("running", running);
     $("#stop-btn").hidden = !running || loop;
     $("#reply").hidden = running || !j.can_reply;
+    $("#ask-btn").disabled = running || !j.can_reply;
     $("#start-btn").disabled = running;
     if (S) S.busy = running;
   }
@@ -269,14 +407,17 @@
     $("#question-body").innerHTML = r.html;
     const isDrill = id.startsWith("drill-");
     $("#answer-box").hidden = isDrill;
+    if (isDrill) timerSet(null);
+    else timerSet(id, parseFloat(r.meta.time_limit_min) || null);
     if (!isDrill && fresh) {
       // 読み込みが終わるまでは保存させない（空の解答で上書きしないように）
       const load = (answerLoad = { id, jid, state: "loading" });
-      $("#answer-text").value = "";
+      ans = { fs: answer.fields(q.text), head: answer.header(id, nowIso()), raw: false };
+      fillAnswer("");
       try {
         const a = await api(`/api/file?kind=answers&id=${encodeURIComponent(id)}`);
         if (answerLoad !== load || !job || job.id !== jid) return;
-        $("#answer-text").value = a.text;
+        fillAnswer(a.text);
         $("#answer-status").textContent = "";
         load.state = "ok";
       } catch (e) {
@@ -293,6 +434,7 @@
     const f = await fetchShown("results", id, jid);
     if (!f) return;
     currentQ = null;
+    timerSet(null);
     $("#question-card").hidden = false;
     $("#question-title").textContent = "講評 " + id;
     $("#question-meta").textContent = "";
@@ -300,20 +442,204 @@
     $("#answer-box").hidden = true;
   }
 
+  // ---------------------------------------------------------- 解答欄（設問ごと）
+  // ans.fs：問題文から読んだ欄の一覧、ans.head：解答ファイルの front matter と「# 解答」、
+  // ans.raw：欄に分けずに1つのテキストで編集しているか（欄を読み取れない問題・解答のとき）
+  let ans = { fs: [], head: "", raw: true };
+
+  function nowIso() {
+    const d = new Date();
+    const p = (n) => String(Math.abs(n)).padStart(2, "0");
+    const off = -d.getTimezoneOffset();
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}` +
+      `${off >= 0 ? "+" : "-"}${p(Math.trunc(off / 60))}:${p(off % 60)}`;
+  }
+
+  function fillAnswer(text) {
+    const p = text ? answer.parse(text, ans.fs) : { header: "", values: {} };
+    if (p && p.header.trim()) ans.head = p.header;
+    ans.raw = !ans.fs.length || !p;
+    $("#answer-text").value = text;
+    renderFields(p ? p.values : {});
+    $("#ask-target").innerHTML = `<option value="">問題全体・本文</option>` +
+      ans.fs.map((f) => `<option>${esc(f.label)}</option>`).join("");
+  }
+
+  function renderFields(values) {
+    $("#answer-fields").innerHTML = ans.fs.map((f) => `<div class="ans-field">
+        <div class="ans-head"><b>${esc(f.label)}</b><span class="ans-prompt">${esc(f.prompt)}</span></div>
+        <textarea data-key="${esc(f.key)}" rows="${f.limit ? Math.min(6, Math.ceil(f.limit / 40) + 1) : 3}" aria-label="${esc(f.label)}"></textarea>
+        <div class="ans-count"></div></div>`).join("");
+    $$("#answer-fields textarea").forEach((t) => { t.value = values[t.dataset.key] || ""; });
+    showMode();
+  }
+
+  function fieldValues() {
+    const v = {};
+    $$("#answer-fields textarea").forEach((t) => { v[t.dataset.key] = t.value; });
+    return v;
+  }
+
+  function answerText() {
+    return ans.raw ? $("#answer-text").value : answer.build(ans.head, ans.fs, fieldValues());
+  }
+
+  function showMode() {
+    $("#answer-fields").hidden = ans.raw;
+    $("#answer-text").hidden = !ans.raw;
+    $("#answer-mode").hidden = !ans.fs.length;
+    $("#answer-mode").textContent = ans.raw ? "設問ごとの欄に戻す" : "まとめて編集";
+    updateCounts();
+  }
+
+  // 字数：改行は数えない。制限の9割を超えたら色を変え、超えたら赤くする（本番では超過は0点）
+  function updateCounts() {
+    if (ans.raw) { $("#answer-total").textContent = ""; return; }
+    let over = 0, filled = 0;
+    $$("#answer-fields .ans-field").forEach((el, i) => {
+      const f = ans.fs[i];
+      const n = answer.count(el.querySelector("textarea").value);
+      const c = el.querySelector(".ans-count");
+      if (n) filled++;
+      if (f.limit) {
+        c.textContent = n > f.limit ? `${n} / ${f.limit}字（${n - f.limit}字オーバー）` : `${n} / ${f.limit}字`;
+        c.className = "ans-count" + (n > f.limit ? " over" : n >= f.limit * 0.9 ? " near" : "");
+        if (n > f.limit) over++;
+      } else {
+        c.textContent = `${n}字`;
+        c.className = "ans-count";
+      }
+    });
+    $("#answer-total").textContent = `${filled} / ${ans.fs.length} 問記入` + (over ? `・字数オーバー ${over}問` : "");
+  }
+  $("#answer-fields").addEventListener("input", () => { updateCounts(); timerAutoStart(); });
+  $("#answer-text").addEventListener("input", timerAutoStart);
+
+  $("#answer-mode").addEventListener("click", () => {
+    if (ans.raw) {
+      const p = answer.parse($("#answer-text").value, ans.fs);
+      if (!p) return notice("欄に分けられない書き込みがあります。「## 設問1」「(1)」の見出しの下に書いてください", "warn");
+      if (p.header.trim()) ans.head = p.header;
+      ans.raw = false;
+      renderFields(p.values);
+    } else {
+      $("#answer-text").value = answerText();
+      ans.raw = true;
+      showMode();
+    }
+  });
+
   let answerLoad = null;
-  async function saveAnswer() {
+  async function saveAnswer(submit) {
     if (!currentQ) return;
     if (!answerLoad || answerLoad.id !== currentQ || answerLoad.state !== "ok") {
       throw new Error(answerLoad && answerLoad.state === "loading" ? "解答を読み込み中です" : "解答を読み込めていないので保存できません");
     }
-    await api(`/api/answers/${encodeURIComponent(currentQ)}`, { method: "PUT", body: { text: $("#answer-text").value } });
+    let text = answerText();
+    if (submit) {
+      text = answer.setMeta(text, "submitted_at", nowIso());
+      const ms = timerElapsed(currentQ);
+      if (ms > 0) text = answer.setMeta(text, "elapsed_min", Math.max(1, Math.round(ms / 60000)));
+    }
+    await api(`/api/answers/${encodeURIComponent(currentQ)}`, { method: "PUT", body: { text } });
     $("#answer-status").textContent = "保存しました " + new Date().toLocaleTimeString();
   }
+
+  // ---------------------------------------------------------- タイマー
+  // 問題ごとに localStorage へ {acc: 止めるまでに貯めたミリ秒, since: 動かし始めた時刻} を持つ。
+  // 再読み込みや別の端末の画面でも続きから測れる。目安時間（time_limit_min）を過ぎたら赤くする
+  const tm = { id: null, limit: null, warned: false, iv: null };
+  const tKey = (id) => "learn.timer." + id;
+  function tLoad(id) {
+    try { return JSON.parse(localStorage.getItem(tKey(id))) || { acc: 0, since: null }; } catch (e) { return { acc: 0, since: null }; }
+  }
+  function tSave(id, t) { try { localStorage.setItem(tKey(id), JSON.stringify(t)); } catch (e) {} }
+  function timerElapsed(id) { const t = tLoad(id); return t.acc + (t.since ? Date.now() - t.since : 0); }
+  function fmtMs(ms) {
+    const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = String(s % 60).padStart(2, "0");
+    return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+  }
+
+  function timerSet(id, limitMin) {
+    if (tm.id !== id) tm.warned = false;
+    tm.id = id;
+    tm.limit = limitMin ? limitMin * 60000 : null;
+    clearInterval(tm.iv);
+    tm.iv = id ? setInterval(timerRender, 1000) : null;
+    timerRender();
+  }
+  function timerStart(id) { const t = tLoad(id); if (!t.since) { t.since = Date.now(); tSave(id, t); } }
+  function timerPause(id) { const t = tLoad(id); if (t.since) { t.acc += Date.now() - t.since; t.since = null; tSave(id, t); } timerRender(); }
+  function timerAutoStart() {
+    if (!tm.id) return;
+    const t = tLoad(tm.id);
+    if (!t.since && !t.acc) { timerStart(tm.id); timerRender(); }
+  }
+
+  function timerRender() {
+    const el = $("#timer");
+    const visible = !!tm.id && !$("#tab-study").hidden && !$("#question-card").hidden;
+    el.hidden = !visible;
+    if (!visible) return;
+    const t = tLoad(tm.id);
+    const ms = timerElapsed(tm.id);
+    const over = tm.limit && ms > tm.limit;
+    $("#timer-text").textContent = tm.limit
+      ? (over ? `${fmtMs(ms)}（${fmtMs(ms - tm.limit)} 超過）` : `${fmtMs(ms)} / ${fmtMs(tm.limit)}`)
+      : fmtMs(ms);
+    el.classList.toggle("over", !!over);
+    el.classList.toggle("running", !!t.since);
+    $("#timer-toggle").textContent = t.since ? "一時停止" : t.acc ? "再開" : "開始";
+    if (over && t.since && !tm.warned) {
+      tm.warned = true;
+      notice(`目安時間（${Math.round(tm.limit / 60000)}分）を過ぎました。本番ならここで見直しに移る時間です。`, "warn");
+    }
+  }
+  $("#timer-toggle").addEventListener("click", () => {
+    if (!tm.id) return;
+    if (tLoad(tm.id).since) timerPause(tm.id);
+    else { timerStart(tm.id); timerRender(); }
+  });
+  $("#timer-reset").addEventListener("click", () => {
+    if (!tm.id || !confirm("タイマーを 0 に戻しますか？")) return;
+    tSave(tm.id, { acc: 0, since: null });
+    tm.warned = false;
+    timerRender();
+  });
+
+  // ---------------------------------------------------------- 解答中の質問
+  // 問題を出した会話の続きとして送る。返し方（答えを匂わせない）は /inbox スキルと CLAUDE.md に書いてある
+  const ASK_KINDS = {
+    word: ["言葉の意味", "例：DMARC、p=none（わからない言葉を書く）"],
+    ask: ["何を聞かれているか", "例：「どう扱われるか」は何について書けばいい？"],
+    worry: ["不安・その他", "例：この設問は2つ書く必要がある？"],
+  };
+  function askPlaceholder() { $("#ask-text").placeholder = ASK_KINDS[$("#ask").kind.value][1]; }
+  $$("#ask input[name=kind]").forEach((r) => r.addEventListener("change", askPlaceholder));
+  askPlaceholder();
+
+  $("#ask").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const text = $("#ask-text").value.trim();
+    if (!text || !job || !currentQ) return;
+    if (job.status === "running") return notice("前の返事を待っています。届いてからもう一度どうぞ", "warn");
+    const msg = `【解答中の質問】${currentQ}${f.part.value ? " " + f.part.value : ""}\n種類：${ASK_KINDS[f.kind.value][0]}\n${text}`;
+    try {
+      const r = await api(`/api/jobs/${job.id}/reply`, { method: "POST", body: { text: msg } });
+      $("#ask-text").value = "";
+      job = r.job;
+      setStatus(job);
+      poll();
+    } catch (err) { notice(esc(err.message), "error"); }
+  });
   $("#save-answer").addEventListener("click", () => saveAnswer().catch((e) => notice(esc(e.message), "error")));
   $("#grade-btn").addEventListener("click", async () => {
     try {
       await saveAnswer();
       if (!confirm("提出して採点しますか？")) return;
+      timerPause(currentQ);
+      await saveAnswer(true);
       await start({ action: "grade", id: currentQ });
     } catch (e) { notice(esc(e.message), "error"); }
   });
@@ -403,8 +729,8 @@
     $("#profile-text").value = text || "";
     $("#profile-text").placeholder = "まだありません。上でサンプルを選ぶか、対話で設定してください。";
   }
-  $("#copy-example").addEventListener("click", async () => {
-    const key = $("#example-select").value;
+  $("#copy-example").addEventListener("click", () => useExample($("#example-select").value));
+  async function useExample(key) {
     if (!key) return;
     const box = $("#profile-text");
     box.disabled = true; // コピーしている間の入力は置き換えで消えるので、止めておく
@@ -413,18 +739,20 @@
         await api("/api/setup-example", { method: "POST", body: { key } });
       } catch (e) {
         if (!/すでに/.test(e.message)) return notice(esc(e.message), "error");
-        if (!confirm("いまの exam/profile.md を上書きしますか？（学習の記録は消えません）")) return;
+        if (!confirm("いまの資格の設定（exam/profile.md）を置き換えますか？\n学習の記録は消えません。別の資格の記録と分けたいときは、キャンセルして「この資格を設定する」から対話で切り替えてください（古い記録を archive/ に移します）。")) return;
         await api("/api/setup-example", { method: "POST", body: { key, overwrite: true } });
       }
       await loadProfile(true);
       await loadState();
       $("#profile-status").textContent = "コピーしました。目標受験時期と学習者メモを書き換えて保存してください。";
+      notice("資格を切り替えました。目標受験時期と学習者メモは<a href=\"#\" data-go=\"settings\">設定</a>で書き換えられます。");
+      loadHome().catch(() => {});
     } catch (e) {
       notice(esc(e.message), "error");
     } finally {
       box.disabled = false;
     }
-  });
+  }
   $("#setup-chat").addEventListener("click", () => start({ action: "setup" }));
   $("#save-profile").addEventListener("click", async () => {
     try {
@@ -439,9 +767,9 @@
   // ---------------------------------------------------------- 起動
   (async function init() {
     try { await loadState(); } catch (e) { notice(esc(e.message), "error"); return; }
-    let tab = "study";
+    let tab = "home";
     try { tab = localStorage.getItem("learn.tab") || tab; } catch (e) {}
-    if (S.profile !== "ok") tab = "settings";
+    if (S.profile !== "ok" || !$("#tab-" + tab)) tab = "home";
     showTab(tab);
     // 再読み込みしても、最後の会話に戻れるように
     try {
@@ -449,8 +777,10 @@
       let last = null;
       try { last = localStorage.getItem("learn.job"); } catch (e) {}
       // 実行中の会話を優先する（別の端末で始めたものも含めて）
-      const j = jobs.find((x) => x.status === "running") || jobs.find((x) => x.id === last);
+      const running = jobs.find((x) => x.status === "running");
+      const j = running || jobs.find((x) => x.id === last);
       if (j) openJob(j);
+      if (running && running.id !== last) showTab("study");
     } catch (e) {}
   })();
 })();
