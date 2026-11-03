@@ -129,6 +129,9 @@ class ConfidenceTest(unittest.TestCase):
         self.assertGreater(narrowed, guess)
         self.assertGreater(guess, 0.0)
 
+    def test_odd_value_is_unknown(self):
+        self.assertEqual(self.model_after(1, ["sure"]), self.model_after(1, None))
+
     def test_confident_miss_hurts_most(self):
         sure, narrowed, guess, unknown = (self.model_after(0, c) for c in ("sure", "narrowed", "guess", None))
         self.assertEqual(narrowed, unknown)

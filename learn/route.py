@@ -158,7 +158,8 @@ def build_model(concepts, results, exclude_set=None):
         w = KIND_WEIGHT.get(r.get("kind"), 1.0) / len(r["concepts"])  # 長文は論点の数で割る
         if r.get("kind") == "choice":
             table = CONF_WEIGHT_RIGHT if y >= 0.5 else CONF_WEIGHT_WRONG
-            w *= table.get(r.get("confidence"), 1.0)
+            conf = r.get("confidence")
+            w *= table.get(conf if isinstance(conf, str) else None, 1.0)  # 手で直した変な値は不明として扱う
         for c in r["concepts"]:
             m = models.setdefault(c, new_model())
             update(m, y, b, w)

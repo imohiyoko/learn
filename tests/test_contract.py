@@ -109,6 +109,8 @@ class ServerLinesTest(unittest.TestCase):
         sets.answer_set_item(s["id"], b, "ア", "sure")
         with self.assertRaises(ValueError):
             sets.answer_set_item(s["id"], c, "ア", "maybe")
+        with self.assertRaises(ValueError):
+            sets.answer_set_item(s["id"], c, "ア", "")
         sets.answer_set_item(s["id"], c, "ア")  # 確信度なしの古い呼び出しも受ける
         self.check("bank.jsonl", "bank-line")
         rows = jsonl(files.ROOT / "log" / "bank.jsonl")
