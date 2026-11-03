@@ -62,8 +62,14 @@
       const h = line.match(/^##\s*設問\s*(\d+)\s*$/);
       if (h) { big = +h[1]; key = `${big}`; continue; }
       if (/^#/.test(line)) { key = null; put(line); continue; }
+      // 小設問の見出しは「(n)」だけの行（build が書く形）。本文中の「(2)は〜」のような行は本文として扱う
       const s = big != null && line.match(SUB_RE);
-      if (s && keys.has(`${big}-${+s[1]}`)) { key = `${big}-${+s[1]}`; if (s[2].trim()) put(s[2]); continue; }
+      if (s && !s[2].trim()) {
+        const k = `${big}-${+s[1]}`;
+        if (!keys.has(k)) return null; // 問題文にない小設問は欄に分けられない
+        key = k;
+        continue;
+      }
       put(line);
     }
     if (stray) return null;
@@ -98,7 +104,15 @@
     return `---\n${lines.join("\n")}\n---` + text.slice(m[0].length);
   }
 
-  const api = { fields, count, parse, build, header, setMeta };
+  // front matter の1項目を消す（なければそのまま）
+  function delMeta(text, key) {
+    const m = text.match(/^---\n([\s\S]*?)\n---/);
+    if (!m) return text;
+    const lines = m[1].split("\n").filter((l) => !l.startsWith(key + ":"));
+    return `---\n${lines.join("\n")}\n---` + text.slice(m[0].length);
+  }
+
+  const api = { fields, count, parse, build, header, setMeta, delMeta };
   if (typeof window !== "undefined") window.answer = api;
   if (typeof module !== "undefined") module.exports = api;
 })();

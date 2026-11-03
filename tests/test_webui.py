@@ -329,6 +329,12 @@ class WebUITest(unittest.TestCase):
         self.assertEqual(code, 403)
         self.assertFalse((self.tmp / "x.pdf").exists())
         self.assertFalse((self.tmp / "refs" / "past" / "y.pdf").exists())
+        # 一覧から外すのは refs/ 直下の README.md だけ
+        (self.tmp / "refs" / "README.md").write_text("おすすめの置き方", encoding="utf-8")
+        code, _ = self.upload("dir=past&name=README.md", b"memo")
+        self.assertEqual(code, 200)
+        _, r = self.call("/api/refs")
+        self.assertEqual({x["path"] for x in r["refs"]}, {"past/r06a 午後 q1.pdf", "past/README.md"})
 
     def test_09_setup_exam_name(self):
         b = server.build_prompt

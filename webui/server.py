@@ -778,7 +778,8 @@ def update_term_state(key, body):
 
 REF_EXTS = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".txt", ".md"}
 REF_MAX = 50 * 1024 * 1024
-REF_DIRS = ("past", "syllabus", "other")  # refs/ の下に置くフォルダ（refs/README.md のおすすめに合わせる）
+REF_DIRS = ("past", "syllabus", "other")
+REF_LOCK = threading.Lock()  # 同じ名前の同時アップロードで、先に保存した資料を上書きしないように  # refs/ の下に置くフォルダ（refs/README.md のおすすめに合わせる）
 
 
 def ref_name(name):
@@ -796,7 +797,7 @@ def list_refs():
     out = []
     for p in REFS.rglob("*"):
         rel = p.relative_to(REFS)
-        if not p.is_file() or rel.name == "README.md" or any(s.startswith(".") for s in rel.parts):
+        if not p.is_file() or rel.as_posix() == "README.md" or any(s.startswith(".") for s in rel.parts):
             continue
         st = p.stat()
         out.append({"path": rel.as_posix(), "size": st.st_size, "mtime": st.st_mtime})
@@ -818,7 +819,7 @@ def save_ref(folder, name, read, size, overwrite=False):
     dest = d / name
     if dest.exists() and not overwrite:
         raise FileExistsError(f"refs/{folder}/{name} はすでにあります")
-    tmp = d / f".{name}.{uuid.uuid4().hex[:6]}.part"
+    tmp = d / f".{name}.{uuid.uuid4().hex}.part"
     try:
         with open(tmp, "wb") as f:
             left = size
@@ -828,7 +829,10 @@ def save_ref(folder, name, read, size, overwrite=False):
                     raise ValueError("アップロードが途中で切れました")
                 f.write(chunk)
                 left -= len(chunk)
-        os.replace(tmp, dest)
+        with REF_LOCK:
+            if dest.exists() and not overwrite:
+                raise FileExistsError(f"refs/{folder}/{name} はすでにあります")
+            os.replace(tmp, dest)
     finally:
         tmp.unlink(missing_ok=True)
     return f"{folder}/{name}"

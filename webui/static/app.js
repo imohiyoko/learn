@@ -139,8 +139,10 @@
   // ---------------------------------------------------------- ホーム
   const STATUS_ORDER = { "苦手": 0, "ボーダー": 1, "測定中": 2, "未出題": 3, "得意": 4 };
 
+  let homeGen = 0;
   async function loadHome() {
     if (!S) return;
+    const gen = ++homeGen; // 資格を切り替えたあとに古い応答が届いたら捨てる
     const ok = S.profile === "ok";
     $("#home-exam-name").textContent = ok ? S.exam || "いまの資格" : "まだ資格が選ばれていません";
     $("#home-actions").hidden = !ok;
@@ -156,6 +158,7 @@
     if (!ok) { $("#home-summary").textContent = "下の「資格を選ぶ」から始めてください"; $("#home-continue").innerHTML = ""; return; }
 
     const [{ analysis: a }, { items }, { jobs }] = await Promise.all([api("/api/analysis"), api("/api/items"), api("/api/jobs")]);
+    if (gen !== homeGen) return;
     $("#home-summary").textContent = a
       ? `記述 ${a.attempts.written}回（平均 ${pct(a.overall.written_avg)}）・択一 ${a.attempts.drill}問（正答率 ${pct(a.overall.drill_avg)}）・合格ライン ${pct(a.pass_ratio)}` : "";
 
@@ -465,7 +468,8 @@
     const p = text ? answer.parse(text, ans.fs) : { header: "", values: {} };
     if (p && p.header.trim()) ans.head = p.header;
     ans.raw = !ans.fs.length || !p;
-    $("#answer-text").value = text;
+    // 「## 設問」のない問題は1つの欄で書く。新しく書くときは front matter（id・started_at）を入れておく
+    $("#answer-text").value = text || (ans.fs.length ? "" : ans.head + "\n\n");
     renderFields(p ? p.values : {});
     $("#ask-target").innerHTML = `<option value="">問題全体・本文</option>` +
       ans.fs.map((f) => `<option>${esc(f.label)}</option>`).join("");
@@ -545,7 +549,8 @@
     if (submit) {
       text = answer.setMeta(text, "submitted_at", nowIso());
       const ms = timerElapsed(currentQ);
-      if (ms > 0) text = answer.setMeta(text, "elapsed_min", Math.max(1, Math.round(ms / 60000)));
+      // タイマーを使わなかった（0に戻した）ときは前回の値を残さない。採点は started_at との差を使う
+      text = ms > 0 ? answer.setMeta(text, "elapsed_min", Math.max(1, Math.round(ms / 60000))) : answer.delMeta(text, "elapsed_min");
     }
     await api(`/api/answers/${encodeURIComponent(currentQ)}`, { method: "PUT", body: { text } });
     $("#answer-status").textContent = "保存しました " + new Date().toLocaleTimeString();
@@ -553,7 +558,7 @@
 
   // ---------------------------------------------------------- タイマー
   // 問題ごとに localStorage へ {acc: 止めるまでに貯めたミリ秒, since: 動かし始めた時刻} を持つ。
-  // 再読み込みや別の端末の画面でも続きから測れる。目安時間（time_limit_min）を過ぎたら赤くする
+  // 同じブラウザなら再読み込みしても続きから測れる（別の端末とは共有しない）。別の問題や講評に移ると一時停止する。目安時間（time_limit_min）を過ぎたら赤くする
   const tm = { id: null, limit: null, warned: false, iv: null };
   const tKey = (id) => "learn.timer." + id;
   function tLoad(id) {
@@ -567,6 +572,7 @@
   }
 
   function timerSet(id, limitMin) {
+    if (tm.id && tm.id !== id) timerPause(tm.id); // 離れていた時間は数えない
     if (tm.id !== id) tm.warned = false;
     tm.id = id;
     tm.limit = limitMin ? limitMin * 60000 : null;
@@ -641,11 +647,13 @@
   $("#save-answer").addEventListener("click", () => saveAnswer().catch((e) => notice(esc(e.message), "error")));
   $("#grade-btn").addEventListener("click", async () => {
     try {
+      const qid = currentQ;
       await saveAnswer();
-      if (!confirm("提出して採点しますか？")) return;
-      timerPause(currentQ);
+      if (!confirm("提出して採点しますか？") || currentQ !== qid) return;
+      timerPause(qid);
       await saveAnswer(true);
-      await start({ action: "grade", id: currentQ });
+      if (currentQ !== qid) return notice("提出の間に別の問題に切り替わったので、採点は始めませんでした", "warn");
+      await start({ action: "grade", id: qid });
     } catch (e) { notice(esc(e.message), "error"); }
   });
 
