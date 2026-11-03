@@ -22,6 +22,7 @@ description: 学習者の解答を採点し、講評・成績記録・次の出�
 
 2. **採点を任せる**
    - `grader` エージェントに次の4つのパスを渡す：`exam/profile.md`、`questions/<id>.md`、`rubrics/<id>.md`、`answers/<id>.md`。解答の画像を置いたなら、そのパスも渡す
+   - `log/asks.jsonl` にこの `<id>` の行（解答中の質問）があれば、設問・種類・本文を箇条書きで一緒に渡す。点数には使わず、ミスの種類の判断にだけ使ってもらう
    - grader は設問ごとの得点・判定・不足要素・ミスの種類（knowledge / reading / writing）を返す
 
 3. **結果を保存**
@@ -35,9 +36,10 @@ description: 学習者の解答を採点し、講評・成績記録・次の出�
      - `score`・`max`：grader の合計点と満点（数値で）
      - `minutes`：手順1で出した所要時間（数値、分）
      - `graded_at`：現在時刻（ISO8601）
-     - `weak`：具体的な弱点（用語名や読み落とした観点）を最大3つ
+     - `weak`：具体的な弱点（用語名や読み落とした観点）を最大3つ。解答中に意味を聞いた言葉が、失点した設問に関わっていれば優先して入れる
      - `miss_type`：grader が返したミスの種類の件数（数値で）
    - 追記後に `python3 scripts/stats.py` を実行し、警告が出ないことを確認する
+   - grader が `knowledge` とした設問で足りなかった用語（rubric の必須要素の用語）を、`templates/glossary-line.json` の形で `log/glossary.jsonl` に追記する（`source: "grade"`、`from: <id>`、意味は2〜3文の一般的な説明）。採点後なので rubric を元にしてよい。同じ言葉で意味が入った行がすでにあれば足さない
 
 5. **学習者に返す**
    - 合計点、合否ライン（profile の合格基準）との差、設問別の表を表示

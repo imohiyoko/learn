@@ -36,6 +36,7 @@ import subprocess
 import sys
 import threading
 import time
+import unicodedata
 import uuid
 from datetime import datetime
 from http import HTTPStatus
@@ -59,9 +60,12 @@ PAST_RE = re.compile(r"^[a-z0-9]+$")
 
 def configure(root):
     """学習データを置くフォルダを決める（テストでは一時フォルダにする）。"""
-    global ROOT, PROFILE, EXAMPLES, ASSETS, LOGS, VIEWABLE, REFS
+    global ROOT, PROFILE, EXAMPLES, ASSETS, LOGS, VIEWABLE, REFS, ASKS, GLOSSARY, GLOSSARY_STATE
     ROOT = Path(root).resolve()
     REFS = ROOT / "refs"
+    ASKS = ROOT / "log" / "asks.jsonl"  # 解答中の質問（1質問1行）
+    GLOSSARY = ROOT / "log" / "glossary.jsonl"  # 単語帳（1語1行。同じ語は後の行の意味を使う）
+    GLOSSARY_STATE = ROOT / "log" / "glossary-state.json"  # 単語帳の「覚えた」と復習の記録
     PROFILE = ROOT / "exam" / "profile.md"
     EXAMPLES = ROOT / "examples"
     ASSETS = ROOT / "questions" / "assets"
@@ -207,7 +211,8 @@ def analysis():
     tags = stats.load_tags(PROFILE)
     if not tags:
         return None
-    a = analyze.analyze(tags, analyze.load_rows(LOGS["history"][0], LOGS["drill"][0]), analyze.parse_pass_ratio(PROFILE))
+    a = analyze.analyze(tags, analyze.load_rows(LOGS["history"][0], LOGS["drill"][0]), analyze.parse_pass_ratio(PROFILE),
+                        asks=analyze.load_asks(ASKS))
     # 画面用に、analyze.py が文字の表示に使うラベルを添える
     for t in a["tags"].values():
         t["gap_label"] = analyze.GAP_LABEL.get(t.get("gap"))
@@ -257,6 +262,12 @@ def build_prompt(body):
         if not (PAST_RE.match(year) and PAST_RE.match(q)):
             raise ValueError("年度と問番号は英小文字と数字で（例：r06a q1）")
         return f"/import-past {year} {q}", f"過去問の取り込み {year} {q}"
+    if action == "glossary":
+        # 単語帳の意味を Claude にまとめて書いてもらう。語は「、」区切りで最大10語
+        terms = [s.strip() for s in re.split(r"[、,\n]", str(body.get("terms") or "")) if s.strip()]
+        if len(terms) > 10 or any(len(s) > 40 or s.startswith("/") or re.search(r"[\x00-\x1f\x7f]", s) for s in terms):
+            raise ValueError("言葉は1つ40字以内、10語までです")
+        return " ".join(["/glossary", "、".join(terms)]).strip(), "単語帳" + (f" {'、'.join(terms)}" if terms else "")
     if action == "setup":
         # 勉強したい資格の名前（任意）。1行の短い名前だけ受け付ける
         exam = str(body.get("exam") or "").strip()
@@ -358,6 +369,11 @@ class Jobs:
         job = self.get(jid)
         if job and job.proc and job.proc.poll() is None:
             job.proc.terminate()
+
+    def can_reply(self, jid):
+        job = self.get(jid)
+        with self.lock:
+            return bool(job and job.session_id and not any(j.status == "running" for j in self.jobs.values()))
 
     def reply(self, jid, text):
         job = self.get(jid)
@@ -509,6 +525,11 @@ class InboxJobs:
     def stop(self, jid):
         pass
 
+    def can_reply(self, jid):
+        d = self._dir(jid)
+        r = self._read(d) if d and d.is_dir() else None
+        return bool(r and not r[0]["waiting"])
+
 
 
 
@@ -614,6 +635,143 @@ def _run_claude(job, prompt, resume=None):
 CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
                  ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png",
                  ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp"}
+
+
+# ---------------------------------------------------------------- 解答中の質問・単語帳
+
+ASK_KINDS = {"word": "言葉の意味", "ask": "何を聞かれているか", "worry": "不安・その他"}
+PART_RE = re.compile(r"^設問\d+(\(\d+\))?$")
+LOG_LOCK = threading.Lock()
+
+
+def read_jsonl(path):
+    rows = []
+    if path.is_file():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict):
+                rows.append(row)
+    return rows
+
+
+def append_jsonl(path, row):
+    with LOG_LOCK:
+        path.parent.mkdir(exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def term_key(s):
+    """同じ言葉とみなすための形（全角半角・大文字小文字・空白をそろえる）"""
+    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", str(s))).lower()
+
+
+def question_tags(qid):
+    p = safe_child(VIEWABLE["questions"], qid + ".md")
+    if not p or not p.is_file():
+        return None
+    return re.findall(r"[a-z][a-z0-9_-]*", front_matter(p.read_text(encoding="utf-8")).get("tags", ""))
+
+
+def ask_message(qid, part, kind, text):
+    return f"【解答中の質問】{qid}{' ' + part if part else ''}\n種類：{ASK_KINDS[kind]}\n{text}"
+
+
+def record_ask(qid, part, kind, text):
+    tags = question_tags(qid)
+    if tags is None:
+        raise LookupError("その問題はありません")
+    if kind not in ASK_KINDS:
+        raise ValueError("質問の種類が正しくありません")
+    if part and not PART_RE.match(part):
+        raise ValueError("設問の指定が正しくありません")
+    if not text or len(text) > 2000:
+        raise ValueError("質問は1〜2000字で書いてください")
+    append_jsonl(ASKS, {"id": qid, "tags": tags, "part": part or None, "kind": kind, "text": text, "asked_at": now_iso()})
+
+
+def load_glossary_state():
+    try:
+        s = json.loads(GLOSSARY_STATE.read_text(encoding="utf-8"))
+        return s if isinstance(s, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def glossary():
+    """単語帳を語ごとにまとめる。意味は後の行が優先、分野と出どころは足し合わせる。
+    「言葉の意味」の質問で、どの語にも当たらないものは pending として返す（/glossary で意味を作る）"""
+    terms = {}
+    for row in read_jsonl(GLOSSARY):
+        term = str(row.get("term") or "").strip()
+        if not term:
+            continue
+        t = terms.setdefault(term_key(term), {"term": term, "meaning": "", "tags": [], "sources": [], "from": [],
+                                              "added_at": row.get("added_at"), "asked": 0})
+        t["term"] = term  # 表記は後の行にそろえる
+        if row.get("meaning"):
+            t["meaning"] = str(row["meaning"])
+        for k, v in (("tags", row.get("tags") or []), ("sources", [row.get("source")]), ("from", [row.get("from")])):
+            for x in v if isinstance(v, list) else [v]:
+                if x and isinstance(x, str) and x not in t[k]:
+                    t[k].append(x)
+    pending = []
+    for a in read_jsonl(ASKS):
+        if a.get("kind") != "word":
+            continue
+        text = term_key(a.get("text", ""))
+        hit = [t for k, t in terms.items() if k and k in text]
+        for t in hit:
+            t["asked"] += 1
+        if not hit:
+            pending.append({"id": a.get("id"), "text": a.get("text"), "asked_at": a.get("asked_at")})
+    state = load_glossary_state()
+    out = []
+    for k, t in terms.items():
+        s = state.get(k) or {}
+        t.update({"key": k, "known": bool(s.get("known")), "reviews": s.get("reviews", 0),
+                  "misses": s.get("misses", 0), "last_review": s.get("last")})
+        out.append(t)
+    out.sort(key=lambda t: (t["known"], -t["asked"], -t["misses"], t["term"]))
+    return {"terms": out, "pending": pending}
+
+
+def add_term(term, meaning, tags):
+    term, meaning = str(term or "").strip(), str(meaning or "").strip()
+    if not term or len(term) > 60 or re.search(r"[\x00-\x1f\x7f]", term):
+        raise ValueError("言葉は1〜60字の1行で書いてください")
+    if len(meaning) > 2000:
+        raise ValueError("意味は2000字以内です")
+    tags = [x for x in (tags or []) if isinstance(x, str) and TAG_RE.match(x)][:5]
+    append_jsonl(GLOSSARY, {"term": term, "meaning": meaning, "tags": tags, "source": "manual", "from": None,
+                            "added_at": now_iso()})
+
+
+def update_term_state(key, body):
+    key = term_key(key or "")
+    if not key:
+        raise ValueError("言葉がありません")
+    with LOG_LOCK:
+        state = load_glossary_state()
+        s = state.setdefault(key, {})
+        if "known" in body:
+            s["known"] = bool(body["known"])
+        if body.get("review") in ("ok", "again"):
+            s["reviews"] = s.get("reviews", 0) + 1
+            if body["review"] == "again":
+                s["misses"] = s.get("misses", 0) + 1
+                s["known"] = False
+            else:
+                s["known"] = True
+            s["last"] = now_iso()
+        GLOSSARY_STATE.parent.mkdir(exist_ok=True)
+        tmp = GLOSSARY_STATE.with_name(GLOSSARY_STATE.name + ".tmp")
+        tmp.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
+        os.replace(tmp, GLOSSARY_STATE)
+    return s
 
 
 # ---------------------------------------------------------------- 資料（refs/）のアップロード
@@ -805,6 +963,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"jobs": self.jobs.list()})
             if path == "/api/refs":
                 return self.send_json({"refs": list_refs(), "dirs": list(REF_DIRS)})
+            if path == "/api/glossary":
+                return self.send_json(glossary())
             m = re.match(r"^/api/jobs/([0-9a-z-]+)$", path)
             if m:
                 r = self.jobs.events(m.group(1), int(q.get("after", 0)), min(float(q.get("wait", 0) or 0), 30))
@@ -845,6 +1005,22 @@ class Handler(BaseHTTPRequestHandler):
                 if not text:
                     return self.error(400, "空です")
                 return self.send_json({"job": self.jobs.reply(m.group(1), text[:20000])})
+            if path == "/api/ask":
+                # 解答中の質問：記録してから、出題した会話の続きとして送る
+                qid, part = str(body.get("id") or ""), str(body.get("part") or "").strip()
+                kind, text = str(body.get("kind") or ""), str(body.get("text") or "").strip()
+                jid = str(body.get("job") or "")
+                with self.jobs.lock:
+                    if not self.jobs.can_reply(jid):
+                        return self.error(409, "前の返事を待っています。届いてからもう一度どうぞ")
+                    record_ask(qid, part, kind, text)
+                    job = self.jobs.reply(jid, ask_message(qid, part, kind, text))
+                return self.send_json({"job": job})
+            if path == "/api/glossary":
+                add_term(body.get("term"), body.get("meaning"), body.get("tags"))
+                return self.send_json({"ok": True})
+            if path == "/api/glossary/state":
+                return self.send_json({"state": update_term_state(body.get("term"), body)})
             m = re.match(r"^/api/jobs/([0-9a-z-]+)/stop$", path)
             if m:
                 self.jobs.stop(m.group(1))

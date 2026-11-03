@@ -15,6 +15,7 @@
     <button data-tab="study">学習する</button>
     <button data-tab="stats">成績</button>
     <button data-tab="history">履歴</button>
+    <button data-tab="glossary">単語帳</button>
     <button data-tab="refs">資料</button>
     <button data-tab="settings">設定</button>
   </nav>
@@ -37,6 +38,7 @@
         <a href="#" data-go="study" class="small">くわしく選ぶ</a>
       </div>
       <p id="home-rec" class="muted small"></p>
+      <p id="home-glossary" class="small" hidden></p>
       <div id="home-continue"></div>
     </div>
 
@@ -143,6 +145,61 @@
           <button type="submit" class="primary">送る</button>
         </form>
       </div>
+    </div>
+  </section>
+
+  <!-- 単語帳：解答中に聞いた言葉・採点で落とした用語・自分で足した言葉 -->
+  <section id="tab-glossary" class="tab" hidden>
+    <div class="card" id="flash" hidden>
+      <div class="card-head">
+        <h2>カードで覚える</h2>
+        <span id="flash-progress" class="muted small"></span>
+        <button id="flash-close" class="small" type="button">やめる</button>
+      </div>
+      <div class="flash-card">
+        <div id="flash-term" class="flash-term"></div>
+        <div id="flash-tags" class="muted small"></div>
+        <div id="flash-meaning" class="md" hidden></div>
+      </div>
+      <div class="row">
+        <button id="flash-show" class="primary" type="button">意味を見る</button>
+        <button id="flash-again" type="button" hidden>まだ</button>
+        <button id="flash-ok" class="primary" type="button" hidden>覚えた</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2>単語帳</h2>
+        <span id="glossary-summary" class="muted small"></span>
+      </div>
+      <p class="muted small">解答中に意味を聞いた言葉と、採点で知識不足だった用語が自動で入ります。何度も聞いた言葉ほど上に出ます。</p>
+      <div class="row">
+        <button id="flash-start" class="primary" type="button">カードで覚える</button>
+        <button id="glossary-fill" type="button" hidden></button>
+      </div>
+      <div class="row">
+        <input id="glossary-q" type="search" placeholder="さがす" aria-label="さがす">
+        <select id="glossary-filter" aria-label="表示">
+          <option value="todo">まだ覚えていない</option>
+          <option value="known">覚えた</option>
+          <option value="all">すべて</option>
+        </select>
+        <select id="glossary-tag" aria-label="分野"></select>
+      </div>
+      <div id="glossary-list"></div>
+    </div>
+
+    <div class="card">
+      <h2>言葉を足す</h2>
+      <form id="glossary-add">
+        <div class="row">
+          <label>言葉 <input name="term" maxlength="60" required></label>
+          <label>分野 <select name="tag" id="glossary-add-tag"></select></label>
+        </div>
+        <textarea name="meaning" rows="2" placeholder="意味（空欄なら、あとで「意味を Claude に書いてもらう」で埋められます）" aria-label="意味"></textarea>
+        <div class="row"><button type="submit">足す</button></div>
+      </form>
     </div>
   </section>
 

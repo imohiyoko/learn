@@ -16,6 +16,8 @@
 - 分野の判定は、記録が足りている形式のうち見込みの低い方で行う（記述で落とす分野を
   択一の正答率で「得意」と見誤らないため）
 - 合格ラインは exam/profile.md の「合格基準」から読む（読めなければ 60%）
+- 解答中の質問（log/asks.jsonl）は見込みには入れない（聞くと点が下がる仕組みにしないため）。
+  分野ごとの質問の数と、何度も意味を聞いている言葉を、弱点の手がかりとして別に出す
 """
 import argparse
 import json
@@ -83,6 +85,41 @@ def load_rows(history_path=None, drill_path=None):
     return rows
 
 
+ASK_LABEL = {"word": "言葉の意味", "ask": "何を聞かれているか", "worry": "不安・その他"}
+
+
+def load_asks(path=None):
+    """解答中の質問を読む。壊れた行は飛ばす。"""
+    path = Path(path) if path else stats.ROOT / "log" / "asks.jsonl"
+    out = []
+    if path.is_file():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(r, dict) and r.get("kind") in ASK_LABEL and isinstance(r.get("tags"), list) and r["tags"]:
+                out.append(r)
+    return out
+
+
+def summarize_asks(asks, per):
+    """分野ごとの質問の数（主タグで数える）と、2回以上意味を聞いた言葉"""
+    words = defaultdict(lambda: {"count": 0, "label": None, "tags": Counter()})
+    for a in asks:
+        tag = a["tags"][0]
+        if tag in per:
+            per[tag]["asks"][a["kind"]] += 1
+        if a["kind"] == "word" and isinstance(a.get("text"), str) and a["text"].strip():
+            key = re.sub(r"\s+", "", a["text"]).casefold()
+            e = words[key]
+            e["count"] += 1
+            e["label"] = e["label"] or a["text"].strip()
+            e["tags"][tag] += 1
+    return sorted(({"term": e["label"], "count": e["count"], "tags": [t for t, _ in e["tags"].most_common()]}
+                   for e in words.values() if e["count"] >= 2), key=lambda x: (-x["count"], x["term"]))
+
+
 def sort_key(row):
     """graded_at を時刻として並べる（タイムゾーンの違う記録が混ざっても順序を保つ）。"""
     raw = str(row.get("graded_at") or "")
@@ -101,7 +138,7 @@ def new_model():
 
 def new_tag(name="(profile未登録)", weight=1.0):
     return {"name": name, "weight": weight, "models": {"written": new_model(), "drill": new_model()},
-            "miss": Counter(), "weak": Counter()}
+            "miss": Counter(), "weak": Counter(), "asks": Counter()}
 
 
 def update(m, y, w):
@@ -130,7 +167,7 @@ def summarize(m, kind):
     }
 
 
-def analyze(tags, rows, pass_ratio=DEFAULT_PASS):
+def analyze(tags, rows, pass_ratio=DEFAULT_PASS, asks=None):
     per = {t: new_tag(name, w) for t, (name, w) in tags.items()}
     total_miss = Counter()
     weak_all = defaultdict(lambda: {"count": 0, "tags": Counter(), "label": None})
@@ -193,7 +230,13 @@ def analyze(tags, rows, pass_ratio=DEFAULT_PASS):
             "miss": dict(s["miss"]),
             "weak": [weak_all[k]["label"] for k, _ in s["weak"].most_common(3)],
             "gap": format_gap(w, d, pass_ratio),
+            "asks": None,
         }
+
+    asked_terms = summarize_asks(asks or [], per)
+    for tag, s in per.items():
+        if s["asks"]:
+            result[tag]["asks"] = dict(s["asks"])
 
     repeated = sorted(
         ({"term": e["label"], "count": e["count"], "tags": [t for t, _ in e["tags"].most_common()]}
@@ -212,6 +255,8 @@ def analyze(tags, rows, pass_ratio=DEFAULT_PASS):
         "miss_type": dict(total_miss),
         "tags": result,
         "repeated_weak": repeated[:10],
+        "asks": {"total": len(asks or []), "by_kind": dict(Counter(a["kind"] for a in asks or [])),
+                 "repeated_terms": asked_terms[:10]},
     }
 
 
@@ -345,6 +390,15 @@ def render(a):
         out.append("■ 繰り返している弱点")
         for w in a["repeated_weak"][:5]:
             out.append(f"  {w['term']}  {w['count']}回  ({', '.join(w['tags'])})")
+    q = a.get("asks") or {}
+    if q.get("total"):
+        out.append("")
+        out.append("■ 解答中の質問（見込みには入れていない）: " + ", ".join(
+            f"{ASK_LABEL[k]} {v}件" for k, v in sorted(q["by_kind"].items(), key=lambda kv: -kv[1])))
+        many = sorted(((t, sum(s["asks"].values())) for t, s in a["tags"].items() if s.get("asks")), key=lambda x: -x[1])
+        out.append("  分野別: " + ", ".join(f"{t} {n}件" for t, n in many[:5]))
+        for w in q.get("repeated_terms", [])[:5]:
+            out.append(f"  何度も聞いた言葉: {w['term']}  {w['count']}回  ({', '.join(w['tags'])})")
     out.append("")
     out.append("見込み（カッコ内は95%の幅）は新しい結果ほど強く効き、記録が少ないうちは50%に寄せて見積もる。")
     out.append("* は判定に使った形式（記録が足りている形式のうち低い方）。「参考」は記録が少なく判定に使っていない形式。")
@@ -361,7 +415,7 @@ def main():
     if not tags:
         print("exam/profile.md に分野タグがありません。/setup-exam で設定してください。", file=sys.stderr)
         return 1
-    a = analyze(tags, load_rows(), parse_pass_ratio())
+    a = analyze(tags, load_rows(), parse_pass_ratio(), load_asks())
     if args.json:
         print(json.dumps(a, ensure_ascii=False, indent=2))
     else:

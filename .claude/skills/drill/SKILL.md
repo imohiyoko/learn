@@ -15,6 +15,7 @@ description: 択一（選択式）の問題を数問まとめて出題し、答�
    - `exam/profile.md` を読む。ファイルがない、または `<!-- TODO -->` が残っていたら `/setup-exam` を案内して終わる
    - 「択一問題」の節から、選択肢の数・1回の問題数・選択肢の記号を読む。節がない、または値が空・例のコメントだけなら 4択（ア〜エ）・10問とする
    - 引数でタグがなければ `python3 scripts/stats.py --log drill --next 3` で推奨タグを得て、問題をその3分野に配分する（記録がなければ profile の重みの大きい分野から）
+   - `log/glossary.jsonl` に、対象の分野で意味の入った言葉があり、`log/glossary-state.json` で `known` になっていないものがあれば、1〜2問はその言葉を問う問題にする（単語帳の確認。何度も聞いた言葉を優先）
 
 2. **正解キーを先に作る**
    - `<id>` は `drill-YYYYMMDD-HHMM`（時刻は `date +%Y%m%d-%H%M` で取得）。`rubrics/<id>.md` か `questions/<id>.md` が既にあれば、末尾に `-2` などを付けて別の `<id>` にする

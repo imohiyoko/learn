@@ -8,6 +8,8 @@
 - `exam/profile.md` … 対象の試験・出題形式・分野タグ・採点方針。すべてのスキルはこれに従う
 - `log/history.jsonl` … 記述式の過去の成績（1行1解答）。出題分野の選定に使う
 - `log/drill.jsonl` … 択一ドリルの成績（1行1問）
+- `log/asks.jsonl` … 解答中の質問（1行1質問。ブラウザから送ると web UI が書く）。見込みには入れず、弱点の手がかりに使う
+- `log/glossary.jsonl` … 単語帳（1行1語。`templates/glossary-line.json`）。`log/glossary-state.json` は「覚えた」の記録で、web UI が書く
 
 `exam/profile.md` がない、または `<!-- TODO -->` が残っているなら、まず `/setup-exam` を案内すること。
 
@@ -50,6 +52,7 @@
 - `/grade [id]` … 解答を採点する。チャットに貼られた解答も受け付ける
 - `/review` … 成績を分析して得意・不得意な分野、その原因、次の一手を示す（`scripts/analyze.py`）
 - `/import-past` … `refs/` の公式過去問を取り込んで、公式解答例で採点できる形にする
+- `/glossary [言葉、…]` … 単語帳に意味のない言葉の意味を書き足す
 - `/inbox` … ブラウザの画面（`webui/`）から `inbox/` に届いた依頼を処理する。`/loop 1m /inbox` で常駐させる
 
 ## ブラウザから使われるとき
