@@ -5,13 +5,18 @@ description: 対象の試験を設定・変更する。exam/profile.md を対話
 
 # 試験プロファイルの設定
 
+引数：任意で資格の名前（例：`/setup-exam 応用情報技術者試験`）。あれば手順3の「試験名」は聞かずにそれを使い、`examples/` に同じ試験があるかもその名前で探す。
+
 ## 手順
 
 1. `exam/profile.md`（あれば）と `examples/` の一覧を確認する
-   - 対象の試験が `examples/<name>/profile.md` にあれば、それを `exam/profile.md` にコピーし、目標受験時期と学習者メモだけ聞いて埋めれば終わり
-   - なければ `templates/profile.md` を `exam/profile.md` にコピーして、以下の手順で埋める
-2. 既存の `log/history.jsonl` か `log/drill.jsonl` に記録があり、別の試験に切り替える場合：
+2. 既存の `log/history.jsonl` か `log/drill.jsonl` に記録があり、別の試験に切り替える場合は、**プロファイルを書き換える前に**記録を退避する。`examples/` の試験に切り替えるときも同じ（残すと、ホーム画面の集計とおすすめに旧試験の記録が混ざる）
    - 学習者に確認してから、`questions/ rubrics/ answers/ results/ log/` を `archive/<旧試験の略称>-<YYYYMMDD>/` に移動する（削除はしない）
+   - 学習者が移動を断ったら、切り替えをやめるか、記録が混ざることを伝えてから進める
+
+   そのうえで（初めての設定でも切り替えでも）：
+   - 対象の試験が `examples/<name>/profile.md` にあれば、それを `exam/profile.md` にコピーし、目標受験時期と学習者メモだけ聞いて埋めれば終わり（手順3以降は不要）
+   - なければ `templates/profile.md` を `exam/profile.md` にコピーして、手順3以降で埋める
 3. 次をまとめて質問する（分からない項目は Web で公式情報を調べて提案してよい）：
    - 試験名と、記述式で練習したい科目
    - 目標受験時期

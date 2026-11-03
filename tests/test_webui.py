@@ -295,5 +295,108 @@ class WebUITest(unittest.TestCase):
             prof.write_text(saved, encoding="utf-8")
 
 
+    def upload(self, query, data, headers=None):
+        h = {"X-Learn": "1", "Content-Type": "application/octet-stream"}
+        h.update(headers or {})
+        req = urllib.request.Request(self.base + "/api/refs?" + query, data=data, method="POST", headers=h)
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.status, json.loads(r.read() or b"{}")
+        except urllib.error.HTTPError as e:
+            with e:
+                return e.code, json.loads(e.read() or b"{}")
+
+    def test_08_refs_upload(self):
+        from urllib.parse import quote
+        name = quote("r06a 午後 q1.pdf")
+        code, r = self.upload(f"dir=past&name={name}", b"%PDF-1.4 test")
+        self.assertEqual(code, 200, r)
+        self.assertEqual((self.tmp / "refs" / "past" / "r06a 午後 q1.pdf").read_bytes(), b"%PDF-1.4 test")
+        # 同じ名前は、上書きを指定しない限り断る
+        code, _ = self.upload(f"dir=past&name={name}", b"other")
+        self.assertEqual(code, 409)
+        code, _ = self.upload(f"dir=past&name={name}&overwrite=1", b"%PDF-1.5")
+        self.assertEqual(code, 200)
+        _, r = self.call("/api/refs")
+        self.assertEqual([x["path"] for x in r["refs"]], ["past/r06a 午後 q1.pdf"])
+        # フォルダの外・使えない種類・空・独自ヘッダーなしは断る
+        for q in ("dir=past&name=..%2Fx.pdf", "dir=..&name=x.pdf", "dir=past&name=x.exe", "dir=past&name=.x.pdf"):
+            code, _ = self.upload(q, b"x")
+            self.assertEqual(code, 400, q)
+        code, _ = self.upload("dir=past&name=empty.pdf", b"")
+        self.assertEqual(code, 400)
+        code, _ = self.upload("dir=past&name=y.pdf", b"x", {"X-Learn": "0"})
+        self.assertEqual(code, 403)
+        self.assertFalse((self.tmp / "x.pdf").exists())
+        self.assertFalse((self.tmp / "refs" / "past" / "y.pdf").exists())
+        # 一覧から外すのは refs/ 直下の README.md だけ
+        (self.tmp / "refs" / "README.md").write_text("おすすめの置き方", encoding="utf-8")
+        code, _ = self.upload("dir=past&name=README.md", b"memo")
+        self.assertEqual(code, 200)
+        _, r = self.call("/api/refs")
+        self.assertEqual({x["path"] for x in r["refs"]}, {"past/r06a 午後 q1.pdf", "past/README.md"})
+
+    def test_09_setup_exam_name(self):
+        b = server.build_prompt
+        self.assertEqual(b({"action": "setup", "exam": "応用情報技術者試験"})[0], "/setup-exam 応用情報技術者試験")
+        self.assertEqual(b({"action": "setup"})[0], "/setup-exam")
+        for bad in ("/review", "a\nb", "x" * 61):
+            with self.assertRaises(ValueError):
+                b({"action": "setup", "exam": bad})
+
+    def test_10_ask_and_glossary(self):
+        log = self.tmp / "log"
+        for name in ("asks.jsonl", "glossary.jsonl", "glossary-state.json"):
+            (log / name).unlink(missing_ok=True)
+        qid = "20261103-1000-network"
+        (self.tmp / "questions" / f"{qid}.md").write_text("---\ntags: [network, auth]\n---\n本文", encoding="utf-8")
+        # 出題した会話（claude の代わりに fake_claude が答える）
+        code, r = self.call("/api/run", "POST", {"action": "question", "tag": "network"})
+        self.assertEqual(code, 200, r)
+        jid = self.wait_job(r["job"]["id"])["job"]["id"]
+
+        code, r = self.call("/api/ask", "POST", {"job": jid, "id": qid, "part": "設問1(2)", "kind": "word", "text": "DMARC の意味"})
+        self.assertEqual(code, 200, r)
+        r = self.wait_job(jid)
+        self.assertIn("【解答中の質問】20261103-1000-network 設問1(2)\n種類：言葉の意味\nDMARC の意味",
+                      [e.get("text") for e in r["events"] if e["type"] == "user"])
+        rows = [json.loads(x) for x in (log / "asks.jsonl").read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(rows[0]["tags"], ["network", "auth"])
+        self.assertEqual(rows[0]["kind"], "word")
+        # 種類・設問・問題がおかしい質問は記録しない
+        for bad in ({"kind": "x"}, {"part": "設問1; rm"}, {"id": "nope"}, {"text": ""}):
+            body = {"job": jid, "id": qid, "part": "", "kind": "ask", "text": "q", **bad}
+            code, _ = self.call("/api/ask", "POST", body)
+            self.assertIn(code, (400, 404), bad)
+        self.assertEqual(len((log / "asks.jsonl").read_text(encoding="utf-8").splitlines()), 1)
+
+        # まだ意味のない質問は pending、単語帳に入ったら回数に数える
+        _, g = self.call("/api/glossary")
+        self.assertEqual([p["text"] for p in g["pending"]], ["DMARC の意味"])
+        (log / "glossary.jsonl").write_text(json.dumps({"term": "ＤＭＡＲＣ", "meaning": "", "tags": ["network"], "source": "ask"}, ensure_ascii=False)
+                                            + "\n" + json.dumps({"term": "DMARC", "meaning": "送信ドメイン認証の方針", "tags": ["auth"], "source": "grade"}, ensure_ascii=False) + "\n",
+                                            encoding="utf-8")
+        _, g = self.call("/api/glossary")
+        self.assertEqual(g["pending"], [])
+        t = g["terms"][0]
+        self.assertEqual((t["meaning"], t["tags"], t["asked"], t["known"]), ("送信ドメイン認証の方針", ["network", "auth"], 1, False))
+        code, _ = self.call("/api/glossary", "POST", {"term": "SPF", "meaning": "", "tags": ["network", "bad tag"]})
+        self.assertEqual(code, 200)
+        code, _ = self.call("/api/glossary", "POST", {"term": "a\nb"})
+        self.assertEqual(code, 400)
+        code, _ = self.call("/api/glossary/state", "POST", {"term": "dmarc", "review": "ok"})
+        self.assertEqual(code, 200)
+        _, g = self.call("/api/glossary")
+        self.assertEqual([(x["term"], x["known"], x["tags"]) for x in g["terms"]], [("SPF", False, ["network"]), ("DMARC", True, ["network", "auth"])])
+
+        # 分析：質問は見込みに入れず、分野ごとの数として出す
+        _, a = self.call("/api/analysis")
+        self.assertEqual(a["analysis"]["asks"]["total"], 1)
+        self.assertEqual(a["analysis"]["tags"]["network"]["asks"], {"word": 1})
+        self.assertEqual(server.build_prompt({"action": "glossary", "terms": "DMARC、SPF"})[0], "/glossary DMARC、SPF")
+        with self.assertRaises(ValueError):
+            server.build_prompt({"action": "glossary", "terms": "/review"})
+
+
 if __name__ == "__main__":
     unittest.main()

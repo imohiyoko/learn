@@ -11,9 +11,12 @@
   <h1>learn</h1>
   <span id="exam" class="muted"></span>
   <nav>
-    <button data-tab="study" class="active">学習する</button>
+    <button data-tab="home" class="active">ホーム</button>
+    <button data-tab="study">学習する</button>
     <button data-tab="stats">成績</button>
     <button data-tab="history">履歴</button>
+    <button data-tab="glossary">単語帳</button>
+    <button data-tab="refs">資料</button>
     <button data-tab="settings">設定</button>
   </nav>
 </header>
@@ -21,8 +24,43 @@
 <main>
   <div id="notice" class="notice" hidden></div>
 
+  <!-- ホーム：いまの資格・続き・分野・資格の切り替え -->
+  <section id="tab-home" class="tab">
+    <div class="card">
+      <div class="card-head">
+        <h2 id="home-exam-name">いまの資格</h2>
+        <span id="home-summary" class="muted small"></span>
+      </div>
+      <div class="row" id="home-actions">
+        <button class="primary" data-start="question">おすすめの記述を1問</button>
+        <button data-start="drill">おすすめで択一ドリル</button>
+        <button data-start="review">振り返り</button>
+        <a href="#" data-go="study" class="small">くわしく選ぶ</a>
+      </div>
+      <p id="home-rec" class="muted small"></p>
+      <p id="home-glossary" class="small" hidden></p>
+      <div id="home-continue"></div>
+    </div>
+
+    <div class="card" id="home-tags-card">
+      <h2>分野を選んで勉強する</h2>
+      <p class="muted small">苦手な分野から順に並べています。</p>
+      <div id="home-tags" class="tag-grid"></div>
+    </div>
+
+    <div class="card">
+      <h2>資格を選ぶ</h2>
+      <p class="muted small">用意してある資格はすぐに使えます。ほかの資格は名前を入れると、Claude と対話して設定します。</p>
+      <div id="home-examples" class="exam-grid"></div>
+      <form id="home-setup" class="row">
+        <input name="exam" maxlength="60" placeholder="例：応用情報技術者試験（空欄なら Claude が聞きます）" aria-label="勉強したい資格">
+        <button type="submit">この資格を設定する</button>
+      </form>
+    </div>
+  </section>
+
   <!-- 学習する -->
-  <section id="tab-study" class="tab">
+  <section id="tab-study" class="tab" hidden>
     <form id="start" class="card">
       <fieldset class="kinds">
         <legend>学習の種類</legend>
@@ -48,7 +86,7 @@
       <div class="row" data-for="import">
         <label>年度 <input name="year" placeholder="r06a" size="8"></label>
         <label>問番号 <input name="q" placeholder="q1" size="6"></label>
-        <span class="muted small">refs/ に問題冊子と解答例を置いてから</span>
+        <span class="muted small">先に<a href="#" data-go="refs">資料</a>から問題冊子と解答例をアップロードしてください</span>
       </div>
       <p id="rec" class="muted small"></p>
       <button type="submit" class="primary" id="start-btn">はじめる</button>
@@ -62,13 +100,36 @@
         </div>
         <div id="question-body" class="md"></div>
         <div id="answer-box" hidden>
-          <h3>解答</h3>
-          <textarea id="answer-text" rows="14" spellcheck="false" aria-label="解答"></textarea>
+          <div class="card-head">
+            <h3>解答</h3>
+            <span id="answer-total" class="muted small"></span>
+            <button id="answer-mode" class="small" type="button" hidden>まとめて編集</button>
+          </div>
+          <div id="answer-fields"></div>
+          <textarea id="answer-text" rows="14" spellcheck="false" aria-label="解答" hidden></textarea>
           <div class="row">
             <button id="save-answer">保存</button>
             <button id="grade-btn" class="primary">保存して採点する</button>
             <span id="answer-status" class="muted small"></span>
           </div>
+          <details id="ask-box">
+            <summary>わからないとき・不安なとき（Claude に聞く）</summary>
+            <form id="ask" class="ask">
+              <div class="row">
+                <label><input type="radio" name="kind" value="word" checked> 言葉の意味がわからない</label>
+                <label><input type="radio" name="kind" value="ask"> 何を聞かれているかわからない</label>
+                <label><input type="radio" name="kind" value="worry"> 不安・その他</label>
+              </div>
+              <div class="row">
+                <label>どこについて <select name="part" id="ask-target"></select></label>
+              </div>
+              <textarea id="ask-text" rows="2" aria-label="質問"></textarea>
+              <div class="row">
+                <button type="submit" id="ask-btn">聞く</button>
+                <span class="muted small">答えの方向は教えません。言葉の意味と、読み直すとよい場所を返します。返事は下の会話欄に出ます。</span>
+              </div>
+            </form>
+          </details>
         </div>
       </div>
 
@@ -84,6 +145,101 @@
           <button type="submit" class="primary">送る</button>
         </form>
       </div>
+    </div>
+  </section>
+
+  <!-- 単語帳：解答中に聞いた言葉・採点で落とした用語・自分で足した言葉 -->
+  <section id="tab-glossary" class="tab" hidden>
+    <div class="card" id="flash" hidden>
+      <div class="card-head">
+        <h2>カードで覚える</h2>
+        <span id="flash-progress" class="muted small"></span>
+        <button id="flash-close" class="small" type="button">やめる</button>
+      </div>
+      <div class="flash-card">
+        <div id="flash-term" class="flash-term"></div>
+        <div id="flash-tags" class="muted small"></div>
+        <div id="flash-meaning" class="md" hidden></div>
+      </div>
+      <div class="row">
+        <button id="flash-show" class="primary" type="button">意味を見る</button>
+        <button id="flash-again" type="button" hidden>まだ</button>
+        <button id="flash-ok" class="primary" type="button" hidden>覚えた</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2>単語帳</h2>
+        <span id="glossary-summary" class="muted small"></span>
+      </div>
+      <p class="muted small">解答中に意味を聞いた言葉と、採点で知識不足だった用語が自動で入ります。何度も聞いた言葉ほど上に出ます。</p>
+      <div class="row">
+        <button id="flash-start" class="primary" type="button">カードで覚える</button>
+        <button id="glossary-fill" type="button" hidden></button>
+      </div>
+      <div class="row">
+        <input id="glossary-q" type="search" placeholder="さがす" aria-label="さがす">
+        <select id="glossary-filter" aria-label="表示">
+          <option value="todo">まだ覚えていない</option>
+          <option value="known">覚えた</option>
+          <option value="all">すべて</option>
+        </select>
+        <select id="glossary-tag" aria-label="分野"></select>
+      </div>
+      <div id="glossary-list"></div>
+    </div>
+
+    <div class="card">
+      <h2>言葉を足す</h2>
+      <form id="glossary-add">
+        <div class="row">
+          <label>言葉 <input name="term" maxlength="60" required></label>
+          <label>分野 <select name="tag" id="glossary-add-tag"></select></label>
+        </div>
+        <textarea name="meaning" rows="2" placeholder="意味（空欄なら、あとで「意味を Claude に書いてもらう」で埋められます）" aria-label="意味"></textarea>
+        <div class="row"><button type="submit">足す</button></div>
+      </form>
+    </div>
+  </section>
+
+  <!-- 資料：過去問などのアップロード -->
+  <section id="tab-refs" class="tab" hidden>
+    <div class="card">
+      <h2>過去問・資料をアップロード</h2>
+      <p class="muted small">PDF・画像・テキストを <code>refs/</code> に保存します（git には入りません）。過去問は問題冊子と公式解答例（あれば採点講評も）を置いてから、下の「取り込む」で問題にします。</p>
+      <form id="upload">
+        <div class="row">
+          <label>種類
+            <select name="dir">
+              <option value="past">過去問・解答例・採点講評</option>
+              <option value="syllabus">シラバス</option>
+              <option value="other">その他</option>
+            </select>
+          </label>
+        </div>
+        <label class="dropzone" id="dropzone">
+          <input type="file" name="files" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.txt,.md">
+          <span>ここにファイルをドロップ、またはクリックして選ぶ（50MB まで）</span>
+        </label>
+        <div class="row">
+          <button type="submit" class="primary">アップロード</button>
+          <span id="upload-status" class="muted small"></span>
+        </div>
+      </form>
+    </div>
+    <div class="card">
+      <h2>過去問を取り込む</h2>
+      <p class="muted small">アップロードした問題冊子と解答例から、問題と採点基準（公式解答例）を作ります。取り込んだら「学習する」の「取り込んだ過去問」で解けます。</p>
+      <form id="import-form" class="row">
+        <label>年度 <input name="year" placeholder="r06a" size="8"></label>
+        <label>問番号 <input name="q" placeholder="q1" size="6"></label>
+        <button type="submit">取り込む</button>
+      </form>
+    </div>
+    <div class="card">
+      <h2>保存済みの資料</h2>
+      <table class="list"><thead><tr><th>ファイル</th><th>大きさ</th><th>保存日時</th></tr></thead><tbody id="refs-list"></tbody></table>
     </div>
   </section>
 
@@ -126,7 +282,14 @@
   </section>
 </main>
 
+<div id="timer" class="timer" hidden>
+  <span id="timer-text">0:00</span>
+  <button id="timer-toggle" class="small" type="button">開始</button>
+  <button id="timer-reset" class="small" type="button" title="リセット">↺</button>
+</div>
+
 <script src="md.js"></script>
+<script src="answer.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
