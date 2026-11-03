@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/imohiyoko/learn/schema/bank-line.schema.json",
+  "title": "log/bank.jsonl の1行",
+  "description": "問題バンクのセットの成績（1行1問）。択一は web UI のサーバーと /drill、短い記述は /grade-set が書く。",
+  "type": "object",
+  "required": [
+    "id",
+    "set",
+    "item",
+    "kind",
+    "tags",
+    "concepts",
+    "score",
+    "max",
+    "graded_at"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "<set>-<問題id>"
+    },
+    "set": {
+      "type": "string",
+      "pattern": "^set-\\d{8}-\\d{6}(-\\d+)?$"
+    },
+    "item": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "choice",
+        "short"
+      ]
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]*$"
+      },
+      "minItems": 1,
+      "maxItems": 20,
+      "description": "分野タグ。先頭が主タグ"
+    },
+    "concepts": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]*/[a-z0-9][a-z0-9_-]*$"
+      },
+      "description": "論点ID（exam/concepts.md）"
+    },
+    "difficulty": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3
+    },
+    "score": {
+      "type": "number",
+      "minimum": 0
+    },
+    "max": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "answer": {
+      "type": "string",
+      "description": "択一で選んだ記号（サーバーが書く）"
+    },
+    "graded_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "タイムゾーン付きの ISO 8601（RFC 3339）"
+    },
+    "weak": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 50,
+      "description": "具体的な弱点（用語名や読み落とした観点）"
+    },
+    "miss_type": {
+      "type": "object",
+      "properties": {
+        "knowledge": {
+          "type": "number",
+          "minimum": 0
+        },
+        "reading": {
+          "type": "number",
+          "minimum": 0
+        },
+        "writing": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "description": "ミスの種類ごとの件数"
+    }
+  },
+  "additionalProperties": false
+}
