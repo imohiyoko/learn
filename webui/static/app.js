@@ -9,13 +9,26 @@
   let currentQ = null;
 
   async function api(path, opts = {}) {
-    const o = { headers: { "X-Learn": "1" }, ...opts };
+    const { timeout, ...rest } = opts;
+    const o = { headers: { "X-Learn": "1" }, ...rest };
     if (o.body && typeof o.body !== "string") {
       o.body = JSON.stringify(o.body);
       o.headers["Content-Type"] = "application/json";
     }
-    const r = await fetch(path, o);
-    const data = await r.json().catch(() => ({}));
+    // timeout（ミリ秒）を過ぎたら打ち切る。応答も切断もしない回線で待ち続けないように
+    const ctl = timeout ? new AbortController() : null;
+    const timer = ctl && setTimeout(() => ctl.abort(), timeout);
+    if (ctl) o.signal = ctl.signal;
+    let r, data;
+    try {
+      r = await fetch(path, o);
+      data = await r.json().catch(() => ({}));
+    } catch (e) {
+      if (e.name === "AbortError") throw new Error("応答がありません");
+      throw e;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
     if (!r.ok) {
       const err = new Error(data.error || r.statusText);
       err.status = r.status;
@@ -188,7 +201,7 @@
       const id = job.id;
       let r;
       try {
-        r = await api(`/api/jobs/${id}?after=${seq}&wait=20`);
+        r = await api(`/api/jobs/${id}?after=${seq}&wait=20`, { timeout: 35000 }); // サーバーは最大20秒待つ
       } catch (err) {
         if (gen !== pollGen) return;
         if (err.status === 404) {
@@ -217,7 +230,7 @@
       if (q && (q !== currentQ || ended)) await showQuestion(q, q !== currentQ, id);
       if (job.status !== "running") {
         if (ended) {
-          loadState();
+          loadState().catch((e) => notice("成績の表示を更新できませんでした（" + esc(e.message) + "）", "error"));
           const t = job.target || (q && q.startsWith("drill-") ? q : null);
           if (t) await showResult(t, id);
         }
@@ -226,11 +239,27 @@
     }
   }
 
+  // 問題・講評の表示は、あとから始めた取得を優先する（古い取得の結果で新しい表示を上書きしない）
+  let showGen = 0;
+  async function fetchShown(kind, id, jid) {
+    const gen = ++showGen;
+    let f;
+    try {
+      f = await api(`/api/file?kind=${kind}&id=${encodeURIComponent(id)}`);
+    } catch (e) {
+      if (gen === showGen && job && job.id === jid) {
+        notice(`${kind === "results" ? "講評" : "問題"}を読み込めませんでした。履歴から開いてください（${esc(e.message)}）`, "error");
+      }
+      return null;
+    }
+    if (gen !== showGen || !job || job.id !== jid) return null; // 取得中に別の会話・別の表示に切り替わった
+    return f;
+  }
+
   async function showQuestion(id, fresh, jid) {
     if (job && job.status === "running" && !fresh) return;
-    let q;
-    try { q = await api(`/api/file?kind=questions&id=${encodeURIComponent(id)}`); } catch (e) { return; }
-    if (!job || job.id !== jid) return; // 取得中に別の会話に切り替わった
+    const q = await fetchShown("questions", id, jid);
+    if (!q) return;
     const r = md.render(q.text);
     if (r.meta.verified === "false") return; // 検証が終わるまでは出さない
     currentQ = id;
@@ -261,9 +290,8 @@
 
   // 採点が終わったら講評を表示する
   async function showResult(id, jid) {
-    let f;
-    try { f = await api(`/api/file?kind=results&id=${encodeURIComponent(id)}`); } catch (e) { return; }
-    if (!job || job.id !== jid) return; // 取得中に別の会話に切り替わった
+    const f = await fetchShown("results", id, jid);
+    if (!f) return;
     currentQ = null;
     $("#question-card").hidden = false;
     $("#question-title").textContent = "講評 " + id;
@@ -354,7 +382,9 @@
     $$("#viewer-tabs button").forEach((b) => b.addEventListener("click", () => openViewer(id, b.dataset.k)));
     try {
       const f = await api(`/api/file?kind=${kind}&id=${encodeURIComponent(id)}`);
-      $("#viewer-body").innerHTML = md.render(f.text).html;
+      const r = md.render(f.text);
+      $("#viewer-body").innerHTML = kind === "questions" && r.meta.verified === "false"
+        ? `<p class="muted">この問題は検証が終わるまで表示しません。</p>` : r.html;
     } catch (e) { $("#viewer-body").innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
     $("#viewer").scrollIntoView({ behavior: "smooth" });
   }
@@ -402,7 +432,7 @@
       await api("/api/profile", { method: "PUT", body: { text: sent } });
       if ($("#profile-text").value === sent) profileDirty = false; // 保存中に書き足した分は未保存のまま
       $("#profile-status").textContent = "保存しました";
-      loadState();
+      loadState().catch((e) => notice(esc(e.message), "error"));
     } catch (e) { notice(esc(e.message), "error"); }
   });
 
