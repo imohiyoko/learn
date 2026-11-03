@@ -55,7 +55,7 @@ Claude Code で記述式問題の「出題 → 解答 → 採点 → 弱点更�
 ### A. PC の Claude Code に `/loop` で処理させる（既定）
 
 ```bash
-python3 webui/server.py          # → http://127.0.0.1:8765/
+python3 webui/server.py          # → http://127.0.0.1:4870/（使用中なら 4871, 4872, ... と順に試す）
 claude                           # 別のターミナルで、このフォルダで起動して
 > /loop 1m /inbox                # 1分ごとにブラウザからの依頼を処理する
 ```
@@ -85,7 +85,7 @@ ANTHROPIC_API_KEY=sk-ant-... python3 webui/server.py --runner cli   # API キー
 
 ```bash
 LEARN_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))") python3 webui/server.py --host 0.0.0.0
-# → http://<PCのIPアドレス>:8765/?token=<そのトークン>
+# → http://<PCのIPアドレス>:4870/?token=<そのトークン>
 ```
 
 トークンは英数字と `-` `_` だけにしてください（`#` や `&` を含むと URL で途中までしか送られず、開けません）。
