@@ -210,6 +210,8 @@ LEARN_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))") pyt
 ├ templates/              # プロファイル・問題・採点基準・解答・結果・ログのひな形
 ├ scripts/stats.py        # 成績集計と出題分野の推薦（Python標準ライブラリのみ）
 ├ scripts/analyze.py      # 得意・不得意の分析（記述式と択一を合わせて）
+├ scripts/route.py        # 問題バンクから次に解く問題を選ぶ
+├ learn/                  # scripts/ と webui/ が共有する中身（ファイルの読み込み・学習者モデル・集計・分析・出題の選択）
 ├ bank/ sets/ reports/     # 問題バンク（items と正解の keys）・セット・レポート（git に入らない）
 ├ webui/                  # ブラウザから使うためのローカルサーバーと画面（python3 webui/server.py）
 ├ inbox/                  # 画面から Claude Code への依頼（/inbox で処理。git管理外）

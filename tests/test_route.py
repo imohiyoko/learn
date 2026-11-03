@@ -8,9 +8,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT))
 
-import route  # noqa: E402
+from learn import route  # noqa: E402
 
 NOW = datetime(2026, 11, 10, 12, 0, tzinfo=timezone(timedelta(hours=9)))
 

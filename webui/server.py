@@ -48,11 +48,9 @@ from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = Path(__file__).resolve().parent / "static"
-sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT))
 
-import analyze  # noqa: E402
-import route  # noqa: E402
-import stats  # noqa: E402
+from learn import analyze, core, route  # noqa: E402
 
 TAG_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
@@ -71,7 +69,7 @@ def configure(root):
     PROFILE = ROOT / "exam" / "profile.md"
     EXAMPLES = ROOT / "examples"
     ASSETS = ROOT / "questions" / "assets"
-    LOGS = {name: (ROOT / "log" / path.name, n) for name, (path, n) in stats.LOGS.items()}
+    LOGS = {name: (ROOT / "log" / path.name, n) for name, (path, n) in core.LOGS.items()}
     # ブラウザから読めるファイル。rubrics/ は採点前に見せない約束なので出さない
     VIEWABLE = {k: ROOT / k for k in ("questions", "results", "answers")}
     # 問題バンク（bank/keys は正解と採点基準なので、そのままは見せない）・セット・レポート
@@ -110,7 +108,7 @@ def profile_status():
     if not PROFILE.exists():
         return "missing"
     text = PROFILE.read_text(encoding="utf-8")
-    if "<!-- TODO" in text or not stats.load_tags(PROFILE):
+    if "<!-- TODO" in text or not core.load_tags(PROFILE):
         return "todo"
     return "ok"
 
@@ -133,13 +131,13 @@ def drill_default_count():
 def recommend(kinds, n=3):
     """問題バンクから route.py が次に選ぶ問題の分野を [{tag, name, reason}] で返す（出題と同じ選び方）。
     バンクに問題がなければ空。"""
-    tags = stats.load_tags(PROFILE)
+    tags = core.load_tags(PROFILE)
     if not tags:
         return []
     try:
         # 長文は次の1問だけを出すので、おすすめも1分野。解きかけのセットの問題は、セットを作るときと同じく除く
         r = route.route(ROOT, n=1 if kinds == ("long",) else 10, kinds=kinds,
-                        pass_ratio=analyze.parse_pass_ratio(PROFILE), exclude=busy_items())
+                        pass_ratio=core.parse_pass_ratio(PROFILE), exclude=busy_items())
     except Exception:  # バンクの読み込みに失敗しても、画面の表示は止めない
         return []
     out, seen = [], set()
@@ -166,17 +164,6 @@ def list_examples():
     return out
 
 
-def front_matter(text):
-    m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
-    meta = {}
-    if m:
-        for line in m.group(1).splitlines():
-            if ":" in line:
-                k, v = line.split(":", 1)
-                meta[k.strip()] = v.strip()
-    return meta
-
-
 def list_items():
     """出題済みの問題を新しい順に。採点済みかどうかと点数も付ける。"""
     qdir = VIEWABLE["questions"]
@@ -185,7 +172,7 @@ def list_items():
     scores = {}
     for name in ("history", "drill"):
         path, _ = LOGS[name]
-        for row in stats.load_history(path):
+        for row in core.load_history(path):
             rid = str(row.get("id", ""))
             if name == "history":
                 # 同じ問題を採点し直したら、最新の1行だけを使う（load_history は時刻順）
@@ -197,7 +184,7 @@ def list_items():
     items = []
     for p in qdir.glob("*.md"):
         qid = p.stem
-        meta = front_matter(p.read_text(encoding="utf-8"))
+        meta = core.front_matter(p.read_text(encoding="utf-8"))
         items.append({
             "id": qid,
             "kind": "drill" if qid.startswith("drill-") else "written",
@@ -212,7 +199,7 @@ def list_items():
 
 
 def state(jobs, runner):
-    tags = stats.load_tags(PROFILE)
+    tags = core.load_tags(PROFILE)
     return {
         "profile": profile_status(),
         "exam": exam_name(),
@@ -227,10 +214,10 @@ def state(jobs, runner):
 
 
 def analysis():
-    tags = stats.load_tags(PROFILE)
+    tags = core.load_tags(PROFILE)
     if not tags:
         return None
-    a = analyze.analyze(tags, analyze.load_rows(LOGS["history"][0], LOGS["drill"][0], LOGS["bank"][0]), analyze.parse_pass_ratio(PROFILE),
+    a = analyze.analyze(tags, analyze.load_rows(LOGS["history"][0], LOGS["drill"][0], LOGS["bank"][0]), core.parse_pass_ratio(PROFILE),
                         asks=analyze.load_asks(ASKS))
     # 画面用に、analyze.py が文字の表示に使うラベルを添える
     for t in a["tags"].values():
@@ -463,7 +450,7 @@ class InboxJobs:
                 events.append({"type": "user", "text": text})
             if "claude" in pair:
                 body = pair["claude"].read_text(encoding="utf-8")
-                fm = front_matter(body)
+                fm = core.front_matter(body)
                 for q in re.findall(r"[A-Za-z0-9][A-Za-z0-9_.-]*", fm.get("questions", "")):
                     if q not in qids and ID_RE.match(q):
                         qids.append(q)
@@ -697,7 +684,7 @@ def question_tags(qid):
     p = safe_child(VIEWABLE["questions"], qid + ".md")
     if not p or not p.is_file():
         return None
-    return re.findall(r"[a-z][a-z0-9_-]*", front_matter(p.read_text(encoding="utf-8")).get("tags", ""))
+    return re.findall(r"[a-z][a-z0-9_-]*", core.front_matter(p.read_text(encoding="utf-8")).get("tags", ""))
 
 
 def ask_message(qid, part, kind, text):
@@ -813,8 +800,8 @@ def bank_item(iid):
     if not p or not p.is_file():
         return None
     text = p.read_text(encoding="utf-8")
-    meta = route.front_matter(text)
-    body = route.body_of(text)
+    meta = core.front_matter(text)
+    body = core.body_of(text)
     options, lines = [], []
     for line in body.splitlines():
         m = CHOICE_RE.match(line) if meta.get("kind") == "choice" else None
@@ -822,8 +809,8 @@ def bank_item(iid):
             options.append({"label": m.group(1), "text": m.group(2).strip()})
         else:
             lines.append(line)
-    return {"id": iid, "kind": meta.get("kind"), "tags": route.parse_list(meta.get("tags")),
-            "concepts": route.parse_list(meta.get("concepts")), "difficulty": meta.get("difficulty"),
+    return {"id": iid, "kind": meta.get("kind"), "tags": core.parse_list(meta.get("tags")),
+            "concepts": core.parse_list(meta.get("concepts")), "difficulty": meta.get("difficulty"),
             "time_min": meta.get("time_min"), "verified": meta.get("verified") == "true",
             "body": "\n".join(lines).strip(), "options": options}
 
@@ -833,7 +820,7 @@ def bank_key(iid):
     if not p or not p.is_file():
         return None
     text = p.read_text(encoding="utf-8")
-    return {"meta": route.front_matter(text), "body": route.body_of(text)}
+    return {"meta": core.front_matter(text), "body": core.body_of(text)}
 
 
 def set_dir(sid):
@@ -866,7 +853,7 @@ def bank_status():
         return {"ready": False, "concepts": 0, "items": 0}
     st = route.stock(ROOT)
     items = route.load_items(p)
-    pr = analyze.parse_pass_ratio(PROFILE)
+    pr = core.parse_pass_ratio(PROFILE)
     return {"ready": bool(items), "concepts": len(st["concepts"]), "items": len(items),
             "kinds": dict(Counter(v["kind"] for v in items.values())), "need": st["total_need"],
             "unverified": len(st["unverified"]), "model": route.model(ROOT, pass_ratio=pr), "stock": st}
@@ -884,7 +871,7 @@ def create_set(n=10, tag=None, kind="mixed"):
         raise ValueError("問題数は1〜30です")
     with SET_LOCK:  # 同時に作っても、同じ問題が2つのセットに入らないように
         r = route.route(ROOT, n=n, kinds=SET_KINDS[kind], tag=tag or None,
-                        pass_ratio=analyze.parse_pass_ratio(PROFILE), exclude=busy_items())
+                        pass_ratio=core.parse_pass_ratio(PROFILE), exclude=busy_items())
         if not r["items"]:
             raise RuntimeError("出せる問題がバンクにありません。「問題バンクを作る」で用意してください")
         base = "set-" + datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -937,7 +924,7 @@ def set_view(s):
     results = dict(s.get("results", {}))
     if status == "graded":  # 記述の点数は /grade-set が log/bank.jsonl に書いたもの
         for r in read_jsonl(LOGS["bank"][0]):
-            if r.get("set") == s["id"] and r.get("kind") == "short" and stats.is_num(r.get("score")) and stats.is_num(r.get("max")) and r["max"] > 0:
+            if r.get("set") == s["id"] and r.get("kind") == "short" and core.is_num(r.get("score")) and core.is_num(r.get("max")) and r["max"] > 0:
                 results[r.get("item")] = {"score": r["score"], "max": r["max"], "correct": r["score"] >= r["max"] * 0.6}
     items = []
     for it in s["items"]:
@@ -955,7 +942,7 @@ def set_view(s):
     rp = REPORTS / f"{s['id']}.md"
     if rp.is_file():
         out["report"] = rp.read_text(encoding="utf-8")
-        out["compare"] = route.compare(s["id"], ROOT, pass_ratio=analyze.parse_pass_ratio(PROFILE))
+        out["compare"] = route.compare(s["id"], ROOT, pass_ratio=core.parse_pass_ratio(PROFILE))
     return out
 
 
