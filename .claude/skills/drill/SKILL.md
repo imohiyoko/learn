@@ -1,62 +1,46 @@
 ---
 name: drill
-description: 択一（選択式）の問題を数問まとめて出題し、答え合わせ・解説・記録まで行う。知識の確認や午前・科目A対策、「択一やりたい」「選択問題」「小テスト」や /drill で使う。
+description: 問題バンクの択一を数問まとめて出題し、答え合わせ・解説・記録まで行う。知識の確認や午前・科目A対策、「択一やりたい」「選択問題」「小テスト」や /drill で使う。
 ---
 
 # 択一ドリル
 
 引数：任意で分野タグと問題数（例：`/drill`、`/drill web`、`/drill auth 5`）。
 
-記述式の `/question` より軽く、知識の穴をたくさん叩くためのもの。正解キーを先に保存してから見せる点は `/question` と同じ。
+問題はその場で作らない。`/prepare` で前もって作り、verifier の確認を通した問題バンク（`bank/`）の択一から、`scripts/route.py` が選んだものだけを出す（自分で選び直さない）。在庫が足りなければ、ある分だけ出して知らせる。作り足すのは学習者が好きなときに `/prepare` で行う。
+
+ブラウザの画面では、サーバーが同じ選び方で択一だけのセットを作るので、このスキルは使わない（チャットで解くとき用）。
 
 ## 手順
 
 1. **前提を読む**
    - `exam/profile.md` を読む。ファイルがない、または `<!-- TODO -->` が残っていたら `/setup-exam` を案内して終わる
-   - 「択一問題」の節から、選択肢の数・1回の問題数・選択肢の記号を読む。節がない、または値が空・例のコメントだけなら 4択（ア〜エ）・10問とする
-   - 引数でタグがなければ `python3 scripts/stats.py --log drill --next 3` で推奨タグを得て、問題をその3分野に配分する（記録がなければ profile の重みの大きい分野から）
-   - `log/glossary.jsonl` に、対象の分野で意味の入った言葉があり、`log/glossary-state.json` で `known` になっていないものがあれば、1〜2問はその言葉を問う問題にする（単語帳の確認。何度も聞いた言葉を優先）
-
-2. **正解キーを先に作る**
-   - `<id>` は `drill-YYYYMMDD-HHMM`（時刻は `date +%Y%m%d-%H%M` で取得）。`rubrics/<id>.md` か `questions/<id>.md` が既にあれば、末尾に `-2` などを付けて別の `<id>` にする
-   - 問題ごとに、問う知識（用語・仕組み・数値・法令の条文の趣旨など）を1つに絞って決める
-   - 正解は1つだけ。誤りの選択肢は「よくある誤解」「似た用語」「条件違い」で作り、明らかに外れたものを混ぜない
-   - 正解の位置が偏らないようにする（同じ記号が3問以上続かない）
-   - 「すべて正しい」「いずれでもない」は使わない
-   - `templates/drill-key.md` の形で `rubrics/<id>.md` に保存する（正解・各選択肢が誤りである理由・タグ）
-
-3. **問題を保存して検証**
-   - `templates/drill.md` の形で `questions/<id>.md` に保存する（`verified: false`）
-   - `verifier` エージェントに `questions/<id>.md` のパスだけを渡す（正解キーは渡さない）
-   - verifier の答えが正解キーと違う、確信度が低い、正解が複数ありうると指摘された問題は、選択肢か問題文を直す。直せなければ差し替える
-   - 終わったら `verified: true` にする
-
+   - 問題数は引数、なければ profile の「択一問題」の節の1回の問題数、なければ 10。30 を超えるなら 30
+2. **選ぶ**
+   - `python3 scripts/route.py --kinds choice --n <問題数> --json`（タグの指定があれば `--tag <タグ>`）
+   - `items` が空なら「問題バンクに択一がありません。`/prepare`（または画面の『問題バンクを作る』）で作ってから、もう一度どうぞ」と返して終わる
+   - `items` が問題数より少なければ、ある分で続け、最後に「在庫が足りないので N問だけ出しました。`/prepare` で作り足せます」と添える
+3. **セットとして保存する**（画面の履歴とレポートから見返せるように、サーバーと同じ形で残す）
+   - セットの id は `set-YYYYMMDD-HHMMSS`（`date +%Y%m%d-%H%M%S`）。`sets/<id>/` があれば末尾に `-2` などを付ける
+   - `sets/<id>/set.json` に書く：`{"id", "created": 現在時刻, "tag": タグか null, "kind": "choice", "want": 問題数, "phase": route.py の phase, "status": "open", "items": route.py の items そのまま, "answers": {}, "results": {}, "shortage": route.py の shortage}`
 4. **学習者に渡す**
-   - `questions/<id>.md` の問題を表示する。正解キーや verifier の結果には触れない
+   - `bank/items/<id>.md` の本文と選択肢だけを、番号を振って表示する。`bank/keys/` の内容・選ばれた理由の中の正解につながる情報には触れない
    - 最後に一行で案内する：「`1ア 2ウ 3エ …` のようにまとめて答えてください（分からない問題は `?`）」
-   - 開始時刻を覚えておく（`answers/<id>.md` に `started_at` だけ書いた状態で作る）
-
-5. **答え合わせ**
-   - 学習者の解答を `answers/<id>.md` に書き写し、`submitted_at` を入れる。`?` と空欄は不正解として扱う
-   - 正解キーと照合する（照合は機械的に。正解キーを後から変えない）
-   - 学習者が「この選択肢も正しいのでは」と言ったら、根拠を確認し、本当に正解が複数ありうるならその問題を採点から外し（記録しない）、正解キーに理由を書いておく
-   - `templates/drill-result.md` の形で `results/<id>.md` を作る。間違えた問題には「正解の根拠」「選んだ選択肢がなぜ違うか」を1〜2行ずつ。正解した問題は一言でよい
-
+5. **答え合わせ**（機械的に。正解キーを後から変えない）
+   - 各問を `bank/keys/<id>.md` の front matter の `answer` と照らす。`?` と空欄は不正解
+   - 学習者が「この選択肢も正しいのでは」と言い、根拠を確かめて本当に正解が複数ありうるなら、その問題は記録せず、`bank/items/<id>.md` を `verified: false` に戻して理由を `bank/keys/<id>.md` に書いておく（次の `/prepare` で直す）
 6. **記録**
-   - 問題ごとに1行、`log/drill.jsonl` に追記する（形式は `templates/drill-line.json`。改行を含まないJSON）
-     - `id`：`<id>-q<番号>`、`source`：`drill`、`tags`：その問題のタグ（主タグを先頭）
-     - `score`：正解なら1、不正解なら0、`max`：1
-     - `graded_at`：現在時刻（ISO8601）
-     - `weak`：不正解なら、問われた用語や観点を1つ。正解なら空リスト
-     - `miss_type`：不正解なら `knowledge`（知らなかった）か `reading`（問題文や選択肢を読み違えた）のどちらか1件。正解なら空オブジェクト
-   - 追記後に `python3 scripts/stats.py --log drill` を実行し、警告が出ないことを確認する
-
-7. **学習者に返す**
-   - 正答数 / 問題数、分野別の正答数、間違えた問題の要点を表示する
-   - 間違えた用語を記述式でも問われそうなら、「`/question <タグ>` で記述式でも確認できます」と一言添える
+   - 答えた問題ごとに1行、`log/bank.jsonl` に追記する（`templates/bank-line.json` の形。改行を含まないJSON）
+     - `id`：`<セットid>-<問題id>`、`set`・`item`・`kind`（`choice`）・`tags`・`concepts`・`difficulty`：set.json の items から
+     - `score`：正解なら1、不正解なら0、`max`：1、`answer`：選んだ記号、`graded_at`：現在時刻
+     - `weak`：不正解なら主の論点の名前（`exam/concepts.md`）を1つ。正解なら空リスト
+     - `miss_type`：不正解なら `knowledge`（知らなかった）か `reading`（読み違えた）のどちらか1件。正解なら空オブジェクト
+   - `sets/<id>/set.json` の `answers` に `{問題id: 記号}`、`results` に `{問題id: {"correct": true/false, "graded_at": 現在時刻}}` を入れ、`status` を `submitted`、`submitted_at` を現在時刻にする
+7. **レポート**：`/grade-set <セットid>` の手順3〜5で `reports/<セットid>.md` を書く（記述がないので手順2は不要）
+8. **学習者に返す**
+   - 正答数 / 問題数、間違えた問題の正解と根拠（`bank/keys` の解説から1〜2行）
    - 「続けますか？」と聞き、続けるなら `/drill` をもう一度実行する
 
-## 注意
+## 公式の過去問の択一
 
-- `drill-*` の問題は `/grade` の対象にしない（答え合わせはこのスキルで行う）
-- 公式の過去問（科目A・午前など）を解きたい場合は、`refs/` に置いた問題冊子を読んで同じ形式で `questions/drill-past-<年度>-a<範囲>.md` と `rubrics/drill-past-<年度>-a<範囲>.md` に取り込み（`drill-` で始めて `/grade` の対象から外す）、手順4から使ってよい。正解は公式の解答のみを使う
+公式の過去問（科目A・午前など）を択一で解きたいときは、`refs/` の問題冊子から `bank/items/b-past-<年度>-a<番号>.md`（`templates/bank/choice.md` の形。`verified: true`、`concepts` は `exam/concepts.md` から当てはまる論点）と `bank/keys/b-past-<年度>-a<番号>.md`（`answer` は公式の解答だけを使う）に取り込む。取り込んだ問題は、ほかのバンクの問題と同じく route.py が選ぶ。

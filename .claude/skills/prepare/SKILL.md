@@ -21,10 +21,15 @@ description: 問題バンク（bank/）を前もって作る。論点の一覧�
    - `unverified`（確認待ち）の問題があれば、新しく作る前に手順4だけ済ませる
 3. **作る**（上限の数まで。正解キーを先に作る）
    - id：択一 `b-<タグ>-<論点の語>-c<番号>`、短い記述 `-s<番号>`、長文 `b-<タグ>-l<番号>`。同じ id のファイルがあれば番号を進める
-   - 択一：`templates/bank/choice-key.md` の形で `bank/keys/<id>.md` を書いてから、`templates/bank/choice.md` の形で `bank/items/<id>.md` を書く（`verified: false`）。1つの論点の3問は難しさ 1・2・3 を1問ずつにし、問う角度（意味・仕組み・当てはめ）を変える。選択肢の作り方は `/drill` と同じ（正解は1つ、誤りは「よくある誤解」「似た用語」「条件違い」、「すべて正しい」は使わない、正解の位置を偏らせない）
+   - 択一：`templates/bank/choice-key.md` の形で `bank/keys/<id>.md` を書いてから、`templates/bank/choice.md` の形で `bank/items/<id>.md` を書く（`verified: false`）。1つの論点の3問は難しさ 1・2・3 を1問ずつにし、問う角度（意味・仕組み・当てはめ）を変える。選択肢は、正解は1つ、誤りは「よくある誤解」「似た用語」「条件違い」、「すべて正しい」「いずれでもない」は使わない、正解の位置を偏らせない（同じ記号が3問以上続かない）
    - 短い記述：`templates/bank/short-key.md` → `templates/bank/short.md`。5〜10行の事例と設問1つ、20〜60字、10点。事例に根拠を必ず書く
-   - 長文：`/question` の手順2〜3と同じ作り方で、正解キーは `templates/rubric.md` の形、問題は `templates/question.md` の形にする。保存先は `bank/keys/<id>.md` と `bank/items/<id>.md`。front matter に `kind: long`、`concepts: [<この問題で問う論点ID。2〜4個>]`、`difficulty: 2`、`time_min`（profile の目安時間）を足す
+   - 長文：本番形式の記述式。正解キーは `templates/rubric.md` の形（配点合計100点）、問題は `templates/question.md` の形で、`bank/keys/<id>.md` → `bank/items/<id>.md` の順に保存する。front matter に `kind: long`、`concepts: [<この問題で問う論点ID。2〜4個>]`、`difficulty: 2`、`time_min`（profile の目安時間）を足し、`tags` は主タグを先頭に書く
+     - `exam/profile.md` の出題形式（本文の長さ・設問数・字数制限）に沿って設計する
+     - 設問ごとに「本文のどこを読めば答えが決まるか」を先に決め、本文にその根拠を必ず書き込む。知識だけで解ける設問は全体の3割まで
+     - ログ・設定・通信シーケンスなど、実務に近い素材を1つ以上入れる。字数制限は「要素2〜3個を書けばちょうど収まる」長さにする
+     - 図は、まず表・コードブロック・Mermaid の文字で表す。絵でないと伝わらない図だけ SVG を `questions/assets/<id>-fig<n>.svg`（ファイル名は英数字と `-` `_` `.` だけ。日本語を入れると画面で表示できない） に保存して本文から参照し、図の情報は本文か SVG の文字でも読み取れるようにする
    - 架空の組織・システムで作る。実在企業名や過去問本文の転載はしない
+   - 単語帳：`log/glossary.jsonl` に意味の入った言葉があり、`log/glossary-state.json` で `known` になっていないもの（何度も聞いた言葉を優先）は、その言葉を問う択一を、当てはまる論点に1問ずつ作る（今回の上限に含める。同じ言葉を問う問題がまだ解かれずに残っていれば作らない）
 4. **確かめる**
    - `verifier` エージェントに `bank/items/` の問題のパスを、5問ずつまとめて渡す（`bank/keys/` は渡さない）
    - 答えがキーと違う、確信度が低い、正解が複数ありうる、と返った問題は直す。直せなければ消す（`bank/items/` と `bank/keys/` の両方）

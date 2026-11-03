@@ -73,7 +73,7 @@ class WebUITest(unittest.TestCase):
         _, st = self.call("/api/state")
         self.assertEqual(st["profile"], "ok")
         self.assertIn("web", [t["tag"] for t in st["tags"]])
-        self.assertTrue(st["recommend"]["written"])
+        self.assertEqual(st["recommend"], {"written": [], "drill": []}, "おすすめは問題バンクから。バンクがなければ出さない")
         self.assertEqual(st["drill_count"], 10)
 
         # 出題：スキルをスラッシュコマンドで呼び、問題の id を拾う。採点基準の中身は流さない
@@ -117,13 +117,12 @@ class WebUITest(unittest.TestCase):
 
     def test_02_prompts(self):
         b = server.build_prompt
-        self.assertEqual(b({"action": "drill", "tag": "auth", "count": "5"})[0], "/drill auth 5")
-        self.assertEqual(b({"action": "drill"})[0], "/drill")
         self.assertEqual(b({"action": "question", "past": "past-r06a-q1"})[0], "/question past-r06a-q1")
         self.assertEqual(b({"action": "import", "year": "r06a", "q": "q1"})[0], "/import-past r06a q1")
         self.assertEqual(b({"action": "review"})[0], "/review")
         for bad in ({"action": "question", "tag": "web; rm -rf"}, {"action": "grade", "id": "../x"},
-                    {"action": "grade", "id": "drill-1"}, {"action": "drill", "count": 999},
+                    {"action": "grade", "id": "drill-1"},
+                    {"action": "drill"},  # 択一ドリルは画面がバンクのセットにする（Claude にその場で作らせない）
                     {"action": "anything"}):
             with self.assertRaises(ValueError):
                 b(bad)
@@ -153,25 +152,25 @@ class WebUITest(unittest.TestCase):
                 (self.tmp / "examples" / "sc" / "profile.md").read_text(encoding="utf-8"), encoding="utf-8")
             _, st = self.call("/api/state")
             self.assertEqual(st["runner"], "loop")
-            code, r = self.call("/api/run", "POST", {"action": "drill", "tag": "web", "count": 2})
+            code, r = self.call("/api/run", "POST", {"action": "question", "tag": "web"})
             self.assertEqual(code, 200, r)
             jid = r["job"]["id"]
             d = self.tmp / "inbox" / jid
-            self.assertIn("/drill web 2", (d / "000-user.md").read_text(encoding="utf-8"))
+            self.assertIn("/question web", (d / "000-user.md").read_text(encoding="utf-8"))
             _, r = self.call(f"/api/jobs/{jid}")
             self.assertEqual(r["job"]["status"], "running")
-            self.assertEqual(r["events"][0]["text"], "/drill web 2")
+            self.assertEqual(r["events"][0]["text"], "/question web")
             # 返事が来るまでは返信できない
             code, _ = self.call(f"/api/jobs/{jid}/reply", "POST", {"text": "1ア"})
             self.assertEqual(code, 409)
 
             # /inbox スキルが返事を書いた
-            (d / "000-claude.md").write_text("---\nquestions: [drill-20261103-1200]\n---\n\n2問出しました。", encoding="utf-8")
+            (d / "000-claude.md").write_text("---\nquestions: [20261103-1200-web]\n---\n\n1問出しました。", encoding="utf-8")
             _, r = self.call(f"/api/jobs/{jid}?after=1")
             self.assertEqual(r["job"]["status"], "idle")
-            self.assertEqual(r["job"]["question_ids"], ["drill-20261103-1200"])
+            self.assertEqual(r["job"]["question_ids"], ["20261103-1200-web"])
             self.assertEqual([e["type"] for e in r["events"]], ["text", "end"])
-            self.assertEqual(r["events"][0]["text"], "2問出しました。")
+            self.assertEqual(r["events"][0]["text"], "1問出しました。")
 
             code, r = self.call(f"/api/jobs/{jid}/reply", "POST", {"text": "1ア 2ウ"})
             self.assertEqual(code, 200, r)
@@ -449,6 +448,12 @@ class WebUITest(unittest.TestCase):
         self.assertEqual(r["set"]["status"], "graded")
         self.assertIn("解説です", r["set"]["report"])
         self.assertTrue(all("key" in x for x in r["set"]["items"]))
+        # 採点のあとで確認待ちに戻した問題（正解が複数ありうる）は、正解を出さない
+        f = self.tmp / "bank" / "items" / f"{ch['id']}.md"
+        f.write_text(f.read_text(encoding="utf-8").replace("verified: true", "verified: false"), encoding="utf-8")
+        _, r2 = self.call(f"/api/sets/{s['id']}")
+        self.assertNotIn("key", next(x for x in r2["set"]["items"] if x["id"] == ch["id"]))
+        f.write_text(f.read_text(encoding="utf-8").replace("verified: false", "verified: true"), encoding="utf-8")
         self.assertEqual([c["concept"] for c in r["set"]["compare"]], ch["concepts"])
         code, _ = self.call(f"/api/sets/{s['id']}/answer", "POST", {"item": ch["id"], "value": "ア"})
         self.assertEqual(code, 409)
@@ -457,6 +462,20 @@ class WebUITest(unittest.TestCase):
         # 分析にもバンクの択一が入る
         _, a = self.call("/api/analysis")
         self.assertEqual(a["analysis"]["attempts"]["drill"], 1)
+        # 択一ドリル：バンクの択一だけのセット。在庫より多く頼んでも、ある分だけ出す（その場では作らない）
+        code, r = self.call("/api/sets", "POST", {"n": 30, "kind": "choice", "tag": "web"})
+        self.assertEqual(code, 200, r)
+        dr = r["set"]
+        self.assertEqual((dr["kind"], dr["want"]), ("choice", 30))
+        self.assertTrue(dr["items"])
+        self.assertTrue(all(x["kind"] == "choice" for x in dr["items"]))
+        self.assertLess(len(dr["items"]), 30)
+        code, _ = self.call("/api/sets", "POST", {"kind": "long"})
+        self.assertEqual(code, 400)
+        # おすすめも route.py の選び方から（長文はバンクにないので出さない）
+        _, st = self.call("/api/state")
+        self.assertEqual([x["tag"] for x in st["recommend"]["drill"]], ["web"])
+        self.assertEqual(st["recommend"]["written"], [])
         # セットの外は読めない
         code, _ = self.call("/api/sets/..%2Fexam")
         self.assertEqual(code, 404)

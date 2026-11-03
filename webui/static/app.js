@@ -121,7 +121,8 @@
     let a = action();
     const body = { action: a === "past" ? "question" : a };
     if (a === "question" || a === "drill") body.tag = f.tag.value;
-    if (a === "drill") body.count = f.count.value;
+    // 択一ドリルは、問題バンクの択一だけのセットにする（その場では作らない）
+    if (a === "drill") return newSet({ kind: "choice", tag: f.tag.value, n: Math.min(30, +f.count.value || S.drill_count) });
     if (a === "past") { body.past = f.past.value; if (!body.past) return notice("取り込んだ過去問がありません。", "warn"); }
     if (a === "import") { body.year = f.year.value.trim(); body.q = f.q.value.trim(); }
     await start(body);
@@ -219,6 +220,7 @@
     if (!b) return;
     e.preventDefault();
     if (b.dataset.set) return openSet(b.dataset.set);
+    if (b.dataset.start === "drill") return newSet({ kind: "choice", tag: b.dataset.tag || "", n: Math.min(30, S ? S.drill_count : 10) });
     if (b.dataset.start) return start({ action: b.dataset.start, tag: b.dataset.tag || "" });
     if (b.dataset.example) return useExample(b.dataset.example);
     if (b.dataset.job) {
@@ -538,10 +540,16 @@
   let SET = null, setAt = 0, setPick = null, setGen = 0;
   const SLOT_HELP = { "洗い出し": "まだ測れていない論点", "穴埋め": "苦手な論点", "やり直し": "前に間違えた問題", "確認": "得意な論点の確認" };
 
-  async function newSet() {
+  async function newSet(opts) {
+    const body = { n: 10, ...(opts || {}) };
     try {
-      const { set } = await api("/api/sets", { method: "POST", body: { n: 10 } });
+      const { set } = await api("/api/sets", { method: "POST", body });
       showSet(set);
+      // 在庫だけで出す。足りなければ知らせる（バンクは「問題バンクを作る」で好きなときに作り足す）
+      if (set.items.length < body.n) {
+        notice(`問題バンクの在庫が足りないので、${set.items.length}問だけ出しました。` +
+          `「問題バンクを作る」で作り足すと、選べる問題が増えます。`, "warn");
+      }
       showTab("study");
       window.scrollTo({ top: 0 });
     } catch (e) { notice(esc(e.message), "error"); }
@@ -562,7 +570,7 @@
     SET = s;
     try { localStorage.setItem("learn.set", s.id); } catch (e) {}
     $("#set-card").hidden = false;
-    $("#set-title").textContent = "セット " + s.id.replace(/^set-/, "");
+    $("#set-title").textContent = (s.kind === "choice" ? "択一ドリル " : "セット ") + s.id.replace(/^set-/, "");
     const label = { open: "解いている途中", submitted: "採点中", graded: "採点済み" }[s.status];
     $("#set-meta").textContent = `${s.phase}・${s.items.length}問・${label}`;
     const first = s.items.findIndex((it) => it.answer == null);
