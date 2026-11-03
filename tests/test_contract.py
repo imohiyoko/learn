@@ -88,6 +88,8 @@ class ServerLinesTest(unittest.TestCase):
     def test_ask(self):
         server.record_ask("q1", "設問1(2)", "word", "p=none の意味")
         server.record_ask("q1", None, "worry", "時間が足りない")
+        st = server.create_set(n=2, kind="choice")
+        server.ask_set_word(st["id"], st["items"][0]["id"], "SameSite")
         self.check("asks.jsonl", "ask-line")
 
     def test_glossary(self):

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/imohiyoko/learn/schema/ask-line.schema.json",
   "title": "log/asks.jsonl の1行",
-  "description": "解答中の質問。web UI のサーバーが書く。",
+  "description": "解答中の質問。web UI のサーバーが書く（記述の解答欄からと、セットを解いている途中の「わからない言葉」から）。",
   "type": "object",
   "required": [
     "id",
@@ -15,7 +15,12 @@
     "id": {
       "type": "string",
       "minLength": 1,
-      "description": "質問した問題の id"
+      "description": "質問した問題の id（セットの途中なら問題バンクの id）"
+    },
+    "set": {
+      "type": "string",
+      "pattern": "^set-\\d{8}-\\d{6}(-\\d+)?$",
+      "description": "セットを解いている途中の質問なら、そのセット"
     },
     "tags": {
       "type": "array",
@@ -23,9 +28,16 @@
         "type": "string",
         "pattern": "^[a-z][a-z0-9_-]*$"
       },
-      "minItems": 1,
       "maxItems": 20,
-      "description": "分野タグ。先頭が主タグ"
+      "description": "問題の分野タグ。空の行は分析に使わない"
+    },
+    "concepts": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]*/[a-z0-9][a-z0-9_-]*$"
+      },
+      "description": "セットの問題の論点ID"
     },
     "part": {
       "type": [
