@@ -557,7 +557,8 @@ class WebUITest(unittest.TestCase):
         answered = next(x for x in r["items"] if x["stats"]["n"])
         self.assertEqual(answered["stats"]["n"], 1)
         iid = free["id"]
-        self.assertEqual((free["tags"], free["difficulty"], free["verified"], free["has_key"]), (["web"], free["difficulty"], True, True))
+        want_diff = {"0": 1, "1": 2, "2": 3}[free["id"][-1]]  # test_route.make_bank の q0・q1・q2 は難しさ 1・2・3
+        self.assertEqual((free["tags"], free["difficulty"], free["verified"], free["has_key"]), (["web"], want_diff, True, True))
         # 1問：正解キーは頼んだときだけ
         code, r = self.call(f"/api/bank/items/{iid}")
         self.assertEqual(code, 200, r)
@@ -578,7 +579,8 @@ class WebUITest(unittest.TestCase):
         self.assertIn("tags: [web, network]\n", text)
         self.assertIn("- ア 正しい", text)
         # おかしい値は断る
-        for bad in ({"tags": []}, {"tags": ["Web"]}, {"concepts": ["c0"]}, {"difficulty": 4}, {"body": "  "}, {"key": ""}):
+        for bad in ({"tags": []}, {"tags": ["Web"]}, {"concepts": ["c0"]}, {"difficulty": 4}, {"difficulty": True},
+                    {"difficulty": 1.0}, {"body": "  "}, {"key": ""}):
             code, _ = self.call(f"/api/bank/items/{iid}", "PUT", bad)
             self.assertEqual(code, 400, bad)
         # 本文か正解キーを変えたら確認待ちに戻す（出題されなくなる）
@@ -609,6 +611,44 @@ class WebUITest(unittest.TestCase):
         self.assertTrue((self.tmp / "bank" / "keys" / f"{iid}.md").exists())
         code, _ = self.call(f"/api/bank/items/{iid}/restore", "POST", {})
         self.assertEqual(code, 404)
+        # 採点の済んだセットの問題を捨てても、そのセットの見直しには本文と正解が出る
+        _, r = self.call("/api/sets")
+        graded = next(x["id"] for x in r["sets"] if x["status"] == "graded")
+        _, r = self.call(f"/api/sets/{graded}")
+        locked = {x["id"] for x in self.call("/api/bank/items")[1]["items"] if x["busy"]}
+        gi = next(x for x in r["set"]["items"] if x["id"] not in locked)
+        code, _ = self.call(f"/api/bank/items/{gi['id']}/trash", "POST", {})
+        self.assertEqual(code, 200)
+        _, r = self.call(f"/api/sets/{graded}")
+        after = next(x for x in r["set"]["items"] if x["id"] == gi["id"])
+        self.assertEqual((after["body"], after.get("key")), (gi["body"], gi.get("key")))
+        self.call(f"/api/bank/items/{gi['id']}/restore", "POST", {})
+        # 提出して採点を待っているセットの問題も変えない
+        sid = next(x["id"] for x in self.call("/api/sets")[1]["sets"] if x["status"] == "open")
+        sf = self.tmp / "sets" / sid / "set.json"
+        sj = json.loads(sf.read_text(encoding="utf-8"))
+        sf.write_text(json.dumps({**sj, "status": "submitted"}), encoding="utf-8")
+        try:
+            code, _ = self.call(f"/api/bank/items/{sj['items'][0]['id']}/trash", "POST", {})
+            self.assertEqual(code, 409)
+        finally:
+            sf.write_text(json.dumps(sj), encoding="utf-8")
+        # 長文の成績は、出題した問題（issued_to）の log/history.jsonl から
+        lf = self.tmp / "bank" / "items" / "b-web-long.md"
+        lf.write_text("---\nid: b-web-long\nkind: long\ntags: [web]\nconcepts: []\nverified: true\nissued_to: 20261101-1000-web\n---\n長文", encoding="utf-8")
+        hist = self.tmp / "log" / "history.jsonl"
+        keep = hist.read_text(encoding="utf-8") if hist.exists() else None
+        with open(hist, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"id": "20261101-1000-web", "score": 30, "max": 50, "graded_at": "2026-11-01T12:00:00+09:00"}) + "\n")
+        try:
+            _, r = self.call("/api/bank/items/b-web-long")
+            self.assertEqual((r["item"]["stats"]["n"], r["item"]["history"][0]["score"]), (1, 30))
+        finally:
+            lf.unlink()
+            if keep is None:
+                hist.unlink()
+            else:
+                hist.write_text(keep, encoding="utf-8")
         # 書き換えはヘッダーなしでは受けない
         code, _ = self.call(f"/api/bank/items/{iid}/trash", "POST", {}, headers={"X-Learn": "0"})
         self.assertEqual(code, 403)

@@ -12,7 +12,7 @@ import shutil
 from learn import core, route
 from learn.web import files
 from learn.web.files import TAG_RE, read_jsonl, safe_child
-from learn.web.sets import busy_items
+from learn.web.sets import list_sets, load_set
 
 
 KINDS = tuple(route.KIND_WEIGHT)  # choice / fill / short / long
@@ -33,6 +33,15 @@ def _title(body, n=60):
     return ""
 
 
+def locked_items():
+    """解きかけ・採点待ちのセットに入っている問題。採点が終わるまで本文と正解キーを変えない"""
+    out = set()
+    for s in list_sets():
+        if s["status"] in ("open", "submitted"):
+            out.update(it["id"] for it in (load_set(s["id"]) or {}).get("items", []))
+    return out
+
+
 def _difficulty(v):
     try:
         return min(max(int(v), 1), 3)
@@ -41,12 +50,25 @@ def _difficulty(v):
 
 
 def _results():
-    """log/bank.jsonl の成績を問題ごとに（時刻順）"""
+    """log/bank.jsonl の成績を問題ごとに（時刻順）。長文は出題した問題（issued_to）の log/history.jsonl の成績"""
     by = {}
     for r in read_jsonl(files.LOGS["bank"][0]):
         iid = r.get("item")
         if isinstance(iid, str):
             by.setdefault(iid, []).append(r)
+    issued = {}
+    if files.BANK_ITEMS.is_dir():
+        for p in files.BANK_ITEMS.glob("*.md"):
+            q = core.front_matter(p.read_text(encoding="utf-8")).get("issued_to")
+            if q:
+                issued[q] = p.stem
+    if issued:
+        last = {}
+        for r in read_jsonl(files.LOGS["history"][0]):
+            if r.get("id") in issued:
+                last[r["id"]] = r  # 採点し直したら最新の1行だけ
+        for qid, r in last.items():
+            by.setdefault(issued[qid], []).append({**r, "set": None, "answer": None})
     for rows in by.values():
         rows.sort(key=lambda r: str(r.get("graded_at") or ""))
     return by
@@ -64,6 +86,7 @@ def _summary(rows):
 
 def _row(path, results, busy, trashed=False):
     text = path.read_text(encoding="utf-8")
+    body = core.body_of(text)
     meta = core.front_matter(text)
     iid = path.stem
     key_dir = trash_dirs()[1] if trashed else files.BANK_KEYS
@@ -71,13 +94,13 @@ def _row(path, results, busy, trashed=False):
             "concepts": core.parse_list(meta.get("concepts")), "difficulty": _difficulty(meta.get("difficulty")),
             "verified": meta.get("verified") == "true", "has_key": (key_dir / path.name).is_file(),
             "issued_to": meta.get("issued_to") or None, "created_at": meta.get("created_at") or None,
-            "title": _title(core.body_of(text)), "mtime": path.stat().st_mtime,
+            "title": _title(body), "text": body[:4000], "mtime": path.stat().st_mtime,
             "stats": _summary(results.get(iid, [])), "busy": iid in busy}
 
 
 def list_bank():
     """すべての問題（確認待ち・正解キーのないものも含む）と、ゴミ箱の問題"""
-    results, busy = _results(), busy_items()
+    results, busy = _results(), locked_items()
     items, trash = [], []
     if files.BANK_ITEMS.is_dir():
         items = [_row(p, results, busy) for p in sorted(files.BANK_ITEMS.glob("*.md")) if route.ITEM_RE.match(p.stem)]
@@ -105,7 +128,7 @@ def bank_detail(iid, with_key=False):
     except LookupError:
         p, trashed = _item_path(iid, True), True
     text = p.read_text(encoding="utf-8")
-    row = _row(p, _results(), set() if trashed else busy_items(), trashed)
+    row = _row(p, _results(), set() if trashed else locked_items(), trashed)
     out = {**row, "trashed": trashed, "meta": core.front_matter(text), "body": core.body_of(text),
            "history": [{k: r.get(k) for k in ("set", "score", "max", "answer", "confidence", "graded_at", "weak")}
                        for r in _results().get(iid, [])]}
@@ -166,8 +189,8 @@ def _write(path, text):
 
 
 def _not_busy(iid):
-    if iid in busy_items():
-        raise RuntimeError("解いている途中のセットに入っている問題なので、いまは変えられません（セットを提出してから）")
+    if iid in locked_items():
+        raise RuntimeError("解いている途中か採点待ちのセットに入っている問題なので、いまは変えられません（採点が終わってから）")
 
 
 def save_bank(iid, body):
@@ -185,7 +208,7 @@ def save_bank(iid, body):
                                                     meta.get("kind") != "long"))
     if "difficulty" in body:
         d = body["difficulty"]
-        if d not in (1, 2, 3, "1", "2", "3"):
+        if isinstance(d, bool) or d not in (1, 2, 3, "1", "2", "3") or isinstance(d, float):
             raise ValueError("難しさは 1・2・3 のどれかです")
         updates["difficulty"] = str(d)
     changed = False
@@ -216,11 +239,12 @@ def save_bank(iid, body):
     if new_body is not None:
         m = FM_RE.match(out)
         out = out[:m.end()] + "\n" + new_body + "\n"
+    # 先に問題を確認待ちにしてから正解キーを替える（途中で失敗しても、確認前のキーで出題しない）
+    if out != text:
+        _write(p, out)
     if key_changed:
         kp.parent.mkdir(parents=True, exist_ok=True)
         _write(kp, key_text)
-    if out != text:
-        _write(p, out)
     return bank_detail(iid)
 
 
@@ -234,7 +258,8 @@ def trash_bank(iid):
     kp = files.BANK_KEYS / p.name
     if kp.is_file():
         shutil.move(str(kp), str(tk / p.name))
-    else:
+    elif (ti / p.name).exists():
+        # 前に捨てた同じ id の古い正解キー。キーだけ移して止まったやり直しのときは、ゴミ箱に本文がないので消さない
         (tk / p.name).unlink(missing_ok=True)
     shutil.move(str(p), str(ti / p.name))
 

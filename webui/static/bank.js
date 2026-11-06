@@ -10,6 +10,7 @@ const DIFF_LABEL = { 1: "易", 2: "普", 3: "難" };
 const FILTERS = ["q", "kind", "tag", "concept", "diff", "status", "sort"];
 
 let B = null; // /api/bank/items の結果
+let listGen = 0;
 let bankQuery = ""; // 一覧の絞り込み（問題のページから戻るときに使う）
 
 const opt = (v, label, cur) => `<option value="${esc(v)}"${v === cur ? " selected" : ""}>${esc(label)}</option>`;
@@ -28,8 +29,13 @@ function statsCell(s) {
 
 // ---------------------------------------------------------- 一覧
 export async function loadBank(q) {
-  B = await api("/api/bank/items");
-  if (location.pathname !== "/bank") return; // 読み込むあいだに別のページへ移った
+  const gen = ++listGen;
+  if (location.pathname !== "/bank") history.replaceState(null, "", "/bank" + location.search); // /bank/ をそろえる
+  const want = location.search;
+  const data = await api("/api/bank/items");
+  // 読み込むあいだに別のページや別の絞り込みへ移ったら、古い応答は使わない
+  if (gen !== listGen || location.pathname !== "/bank" || location.search !== want) return;
+  B = data;
   const f = Object.fromEntries(FILTERS.map((k) => [k, q.get(k) || ""]));
   $("#bank-q").value = f.q;
   $("#bank-kind").innerHTML = opt("", "形式：すべて", f.kind) + B.kinds.map((k) => opt(k, KIND_LABEL[k] || k, f.kind)).join("");
@@ -60,7 +66,7 @@ function drawBank() {
     && (!f.concept || x.concepts.includes(f.concept)) && (!f.diff || String(x.difficulty) === f.diff)
     && (!f.status || (f.status === "verified" ? x.verified && x.has_key : f.status === "unverified" ? !x.verified
       : f.status === "nokey" ? !x.has_key : f.status === "new" ? !x.stats.n : x.stats.last_ok === false))
-    && words.every((w) => (x.id + " " + x.title).toLowerCase().includes(w)));
+    && words.every((w) => (x.id + " " + x.text).toLowerCase().includes(w)));
   const by = { new: (a, b) => b.mtime - a.mtime, rate: (a, b) => (a.stats.rate ?? 2) - (b.stats.rate ?? 2) || b.stats.n - a.stats.n,
     n: (a, b) => b.stats.n - a.stats.n };
   if (by[f.sort]) rows = rows.slice().sort(by[f.sort]);
@@ -167,15 +173,19 @@ function drawItem(item) {
   $("#bi-restore").hidden = !item.trashed;
 }
 
+// 正解キーを読む。読むあいだに別の問題へ移ったら null（ほかの問題の正解を出したり保存したりしない）
 async function fetchKey() {
-  const { item } = await api(`/api/bank/items/${encodeURIComponent(I.id)}?key=1`);
-  return item.key;
+  const id = I.id, gen = itemGen;
+  const { item } = await api(`/api/bank/items/${encodeURIComponent(id)}?key=1`);
+  return gen === itemGen && I && I.id === id ? { key: item.key } : null;
 }
 
 $("#bi-key-show").addEventListener("click", async () => {
   if (!I) return;
   try {
-    const key = await fetchKey();
+    const r = await fetchKey();
+    if (!r) return;
+    const key = r.key;
     $("#bi-key").innerHTML = key == null ? `<p class="muted">正解キーがありません。</p>` : renderKey(key);
     $("#bi-key").hidden = false;
     $("#bi-key-show").hidden = true;
@@ -199,7 +209,9 @@ function closeEdit() {
 $("#bi-edit-open").addEventListener("click", async () => {
   if (!I) return;
   try {
-    const key = await fetchKey();
+    const r = await fetchKey();
+    if (!r) return;
+    const key = r.key;
     $("#bi-tags").value = I.tags.join(", ");
     $("#bi-concepts").value = I.concepts.join(", ");
     $("#bi-diff").value = String(I.difficulty || 2);

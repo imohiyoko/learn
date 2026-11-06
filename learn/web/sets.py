@@ -20,10 +20,19 @@ CHOICE_RE = re.compile(r"^\s*[-*]\s*([ア-ンA-Z])[\s　.．:：)）]\s*(.+)$")
 SET_LOCK = threading.RLock()
 
 
+def _bank_file(base, sub, iid):
+    """バンクのファイル。ゴミ箱（bank/trash/）に移した問題も、済んだセットの見直しのために読む"""
+    for d in (base, files.ROOT / "bank" / "trash" / sub):
+        p = safe_child(d, iid + ".md")
+        if p and p.is_file():
+            return p
+    return None
+
+
 def bank_item(iid):
     """問題の本文と選択肢。正解キーは含めない"""
-    p = safe_child(files.BANK_ITEMS, iid + ".md")
-    if not p or not p.is_file():
+    p = _bank_file(files.BANK_ITEMS, "items", iid)
+    if not p:
         return None
     text = p.read_text(encoding="utf-8")
     meta = core.front_matter(text)
@@ -43,8 +52,8 @@ def bank_item(iid):
 
 
 def bank_key(iid):
-    p = safe_child(files.BANK_KEYS, iid + ".md")
-    if not p or not p.is_file():
+    p = _bank_file(files.BANK_KEYS, "keys", iid)
+    if not p:
         return None
     text = p.read_text(encoding="utf-8")
     return {"meta": core.front_matter(text), "body": core.body_of(text)}

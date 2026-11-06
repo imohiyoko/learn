@@ -39,7 +39,7 @@ function display(r) {
   if (r.page === "bank") loadBank(q).catch(err);
   if (r.page === "bank-item") loadBankItem(r.id).catch(err);
   if (r.page === "concepts") loadConceptsPage(q).catch(err);
-  if (r.set && (!st.SET || st.SET.id !== r.set)) openSet(r.set, true);
+  if (r.set && (!st.SET || st.SET.id !== r.set || $("#set-card").hidden)) openSet(r.set, true);
   timerRender();
 }
 
@@ -57,12 +57,13 @@ export function showTab(name) {
   go(PATHS[name] || "/", { keepScroll: true });
 }
 
-// セットを開いたら /sets/<id>、しまったら /study に（履歴は増やさない）
+// セットを開いたら /sets/<id>、しまったら /study に。別のセットに替えたときは、戻るで前のセットに戻れるよう履歴を足す
 export function setStudyPath(sid) {
   const cur = parsePath(location.pathname);
   if (cur.page !== "study") return;
   const want = sid ? "/sets/" + encodeURIComponent(sid) : "/study";
-  if (location.pathname !== want) history.replaceState(null, "", want);
+  if (location.pathname === want) return;
+  history[cur.set && sid && cur.set !== sid ? "pushState" : "replaceState"](null, "", want);
 }
 
 window.addEventListener("popstate", () => display(parsePath(location.pathname)));

@@ -1,7 +1,7 @@
 // learn web UI の study.js：学習：出題の依頼、会話、択一ドリル、解答欄、タイマー、解答中の質問。
 // サーバー（webui/server.py）の /api を呼ぶだけの素の JavaScript（ES モジュール。ビルドは要らない）。
 import { $, $$, api, esc, notice, st } from "./util.js";
-import { loadState, setStudyPath, showTab } from "./main.js";
+import { loadState, parsePath, setStudyPath, showTab } from "./main.js";
 import { newSet, openSet, showResult } from "./set.js";
 
 // ---------------------------------------------------------- 学習フォーム
@@ -154,7 +154,9 @@ async function pollLoop(gen) {
       if (ended) {
         loadState().catch((e) => notice("成績の表示を更新できませんでした（" + esc(e.message) + "）", "error"));
         const t = st.job.target || (q && q.startsWith("drill-") ? q : null);
-        if (t && t.startsWith("set-")) await openSet(t, true);
+        // URL で別のセット（/sets/<id>）を開いているときは、そちらを上書きしない
+        const want = parsePath(location.pathname).set;
+        if (t && t.startsWith("set-")) { if (!want || want === t) await openSet(t, true); }
         else if (t) await showResult(t, id);
       }
       return;
