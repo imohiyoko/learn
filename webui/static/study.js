@@ -408,8 +408,20 @@ export function timerSet(id, limitMin) {
   tm.iv = id ? setInterval(timerRender, 1000) : null;
   timerRender();
 }
-function timerStart(id) { const t = tLoad(id); if (!t.since) { t.since = Date.now(); tSave(id, t); } }
+function timerStart(id) { const t = tLoad(id); delete t.hold; if (!t.since) t.since = Date.now(); tSave(id, t); }
 export function timerPause(id) { const t = tLoad(id); if (t.since) { t.acc += Date.now() - t.since; t.since = null; tSave(id, t); } timerRender(); }
+// 答えて解説を読んでいるあいだは止めておき（hold）、次の問題へ移ったら続きから動かす。
+// 再読み込みしても続くよう、止めた理由も localStorage に残す。手で開始・再開したら hold は消える
+export function timerHold(id) {
+  const t = tLoad(id);
+  if (!t.since) return;
+  t.acc += Date.now() - t.since; t.since = null; t.hold = true;
+  tSave(id, t);
+  timerRender();
+}
+export function timerRelease(id) {
+  if (tLoad(id).hold) { timerStart(id); timerRender(); }
+}
 export function timerAutoStart() {
   if (!tm.id) return;
   const t = tLoad(tm.id);
