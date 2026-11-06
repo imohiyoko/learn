@@ -2,7 +2,7 @@
 // サーバー（webui/server.py）の /api を呼ぶだけの素の JavaScript（ES モジュール。ビルドは要らない）。
 import { $, $$, api, esc, notice, st } from "./util.js";
 import { go, setStudyPath } from "./main.js";
-import { fetchShown, openJob, start, timerAutoStart, timerPause, timerSet, tm } from "./study.js";
+import { fetchShown, openJob, start, timerAutoStart, timerHold, timerPause, timerRelease, timerSet, tm } from "./study.js";
 import { pct } from "./stats.js";
 
 // ---------------------------------------------------------- セット（問題バンク）
@@ -242,6 +242,8 @@ async function setAnswer() {
     if (it.kind === "choice") body.unsure = [...setUnsure];
     const { set } = await api(`/api/sets/${st.SET.id}/answer`, { method: "POST", body });
     st.SET = set;
+    // 択一・穴埋めは答えたその場で解説が出る。読んでいるあいだはタイマーを止め、次の問題へ移ったら再開する
+    if (AUTO(it) && tm.id === set.id) timerHold(set.id);
     resumeDeferred(set.id, it.id);
     if (it.kind === "short") setAt++;
     drawSet();
@@ -257,6 +259,7 @@ async function setMove(d) {
     catch (e) { return notice(esc(e.message), "error"); }
   }
   setAt = Math.min(Math.max(setAt + d, 0), st.SET.items.length);
+  if (st.SET.status === "open" && tm.id === st.SET.id) timerRelease(st.SET.id);
   drawSet();
 }
 $("#set-prev").addEventListener("click", () => setMove(-1));
