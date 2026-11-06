@@ -1,7 +1,7 @@
 // learn web UI の home.js：ホーム：おすすめ・論点の見込み・資格のサンプル、資料（refs/）のアップロード。
 // サーバー（webui/server.py）の /api を呼ぶだけの素の JavaScript（ES モジュール。ビルドは要らない）。
 import { $, api, esc, notice, st } from "./util.js";
-import { showTab } from "./main.js";
+import { setStudyPath, showTab } from "./main.js";
 import { openJob, start } from "./study.js";
 import { newSet, openSet } from "./set.js";
 import { pct } from "./stats.js";
@@ -24,7 +24,7 @@ export async function loadHome() {
   api("/api/glossary").then((g) => {
     const todo = g.terms.filter((x) => !x.known).length;
     $("#home-glossary").hidden = !todo;
-    $("#home-glossary").innerHTML = `単語帳：まだ覚えていない言葉が ${todo}語あります。<a href="#" data-go="glossary">単語帳を開く</a>`;
+    $("#home-glossary").innerHTML = `単語帳：まだ覚えていない言葉が ${todo}語あります。<a href="/glossary">単語帳を開く</a>`;
   }).catch(() => {});
   $("#home-set").hidden = !ok;
   if (!ok) { $("#home-summary").textContent = "下の「資格を選ぶ」から始めてください"; $("#home-continue").innerHTML = ""; return; }
@@ -98,6 +98,7 @@ document.addEventListener("click", async (e) => {
       const j = jobs.find((x) => x.id === b.dataset.job);
       if (!j) return notice("この会話はもうありません", "warn");
       $("#set-card").hidden = true;
+      setStudyPath(null);
       openJob(j);
       showTab("study");
     } catch (err) { notice(esc(err.message), "error"); }

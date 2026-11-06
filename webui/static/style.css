@@ -183,3 +183,27 @@ body:has(.timer:not([hidden])) main { padding-bottom: 72px; }
 .review-item summary { cursor: pointer; }
 .set-ask { margin: 0.75rem 0; }
 .set-ask form { margin-top: 0.4rem; }
+nav a { color: inherit; text-decoration: none; padding: 6px 10px; border-radius: 6px; }
+nav a.active { background: var(--user); color: var(--accent); font-weight: 600; }
+header h1 a.brand { color: inherit; text-decoration: none; }
+a { color: var(--accent); }
+button.danger { border-color: var(--weak); color: var(--weak); }
+.row > label.grow { flex: 1 1 320px; }
+.row > label.grow input { flex: 1; min-width: 0; }
+label.block { display: block; margin: 8px 0; }
+.filters input[type=search] { flex: 1 1 200px; }
+.filters select { flex: 0 1 auto; }
+table.list td .sub { color: var(--muted); font-size: 12px; }
+.badge.ok { background: var(--strong); color: var(--card); }
+.badge.warn { background: var(--border); color: var(--card); }
+.badge.ng { background: var(--weak); color: var(--card); }
+details.card > summary { cursor: pointer; font-weight: 600; }
+.need { color: var(--weak); font-weight: 600; }
+.filters select { max-width: 240px; }
+@media (max-width: 600px) {
+  .filters select { max-width: 100%; flex: 1 1 140px; }
+  table:has(#bank-list) thead { display: none; }
+  #bank-list tr { display: grid; grid-template-columns: auto 1fr auto; gap: 2px 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  #bank-list td { border: none; padding: 0; }
+  #bank-list td:first-child { grid-column: 1 / -1; }
+}

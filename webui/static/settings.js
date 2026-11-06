@@ -35,7 +35,7 @@ export async function useExample(key) {
     await loadProfile(true);
     await loadState();
     $("#profile-status").textContent = "コピーしました。目標受験時期と学習者メモを書き換えて保存してください。";
-    notice("資格を切り替えました。目標受験時期と学習者メモは<a href=\"#\" data-go=\"settings\">設定</a>で書き換えられます。");
+    notice("資格を切り替えました。目標受験時期と学習者メモは<a href=\"/settings\">設定</a>で書き換えられます。");
     loadHome().catch(() => {});
   } catch (e) {
     notice(esc(e.message), "error");

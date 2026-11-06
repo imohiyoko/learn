@@ -28,7 +28,8 @@ WEB_ALLOWED = {
     "refs": {"files"},
     "jobs": {"files", "sets"},
     "home": {"files", "jobs", "sets"},
-    "app": {"files", "glossary", "home", "jobs", "refs", "sets"},
+    "bank": {"files", "sets"},  # 問題バンクの管理画面（一覧・編集・ゴミ箱）
+    "app": {"bank", "files", "glossary", "home", "jobs", "refs", "sets"},
 }
 
 

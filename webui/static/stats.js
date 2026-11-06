@@ -1,24 +1,12 @@
 // learn web UI の stats.js：成績。
 // サーバー（webui/server.py）の /api を呼ぶだけの素の JavaScript（ES モジュール。ビルドは要らない）。
 import { $, api, esc } from "./util.js";
-import { STATUS_ORDER } from "./home.js";
 
 // ---------------------------------------------------------- 成績
 export const pct = (x) => (x == null ? "—" : Math.round(x * 100) + "%");
 const MISS = { knowledge: "知識", reading: "読解", writing: "記述" };
 
-async function loadConcepts() {
-  const b = await api("/api/bank");
-  const rows = Object.values(b.model || {});
-  if (!rows.length) { $("#concepts-body").innerHTML = `<p class="muted">論点の一覧（exam/concepts.md）がまだありません。ホームの「問題バンクを作る」から作れます。</p>`; return; }
-  rows.sort((x, y) => (STATUS_ORDER[x.status] ?? 2) - (STATUS_ORDER[y.status] ?? 2) || x.p - y.p);
-  $("#concepts-body").innerHTML = `<div class="table"><table><thead><tr><th>論点</th><th>判定</th><th>見込み</th><th>解いた数</th></tr></thead><tbody>${
-    rows.map((c) => `<tr class="st-${esc(c.status)}"><td>${esc(c.name)}<div class="muted small">${esc(c.concept)}</div></td><td><span class="badge">${esc(c.status)}</span></td>
-      <td>${c.n ? `${pct(c.p)} <span class="muted small">(${pct(c.low)}〜${pct(c.high)})</span>` : "—"}</td><td>${c.n}</td></tr>`).join("")}</tbody></table></div>`;
-}
-
 export async function loadStats() {
-  loadConcepts().catch((e) => { $("#concepts-body").textContent = e.message; });
   const box = $("#stats-body");
   try {
     const { analysis: a } = await api("/api/analysis");
@@ -50,5 +38,5 @@ function askSection(a) {
   const terms = (q.repeated_terms || []).slice(0, 5).map((w) => `${esc(w.term)}（${w.count}回）`).join("、");
   return `<h3>解答中の質問</h3>
     <p class="small">${kinds}${tags ? `<br>分野別：${tags}` : ""}${terms ? `<br>何度も聞いた言葉：${terms}` : ""}</p>
-    <p class="muted small">質問しても点数や判定は変わりません。言葉の質問が多い分野は、択一ドリルと<a href="#" data-go="glossary">単語帳</a>で知識を固めるのがおすすめです。</p>`;
+    <p class="muted small">質問しても点数や判定は変わりません。言葉の質問が多い分野は、択一ドリルと<a href="/glossary">単語帳</a>で知識を固めるのがおすすめです。</p>`;
 }
