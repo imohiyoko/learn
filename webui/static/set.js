@@ -49,8 +49,12 @@ function showSet(s, at) {
   $("#set-meta").textContent = `${s.phase}・${s.items.length}問・${label}`;
   const first = s.items.findIndex((it) => it.answer == null);
   setAt = at ?? (same ? setAt : first < 0 ? s.items.length : first);
-  if (s.status === "open") timerSet(s.id, s.items.reduce((m, it) => m + (parseFloat(it.time_min) || (AUTO(it) ? 1 : 8)), 0));
-  else if (tm.id === s.id) timerSet(null);
+  if (s.status === "open") {
+    timerSet(s.id, s.items.reduce((m, it) => m + (parseFloat(it.time_min) || (AUTO(it) ? 1 : 8)), 0));
+    // 解説を読んでいる途中で再読み込みすると、まだ答えていない問題が開く。そのときは止めていたタイマーを戻す
+    const cur = s.items[setAt];
+    if (!(cur && AUTO(cur) && cur.result)) timerRelease(s.id);
+  } else if (tm.id === s.id) timerSet(null);
   drawSet();
 }
 
@@ -243,7 +247,8 @@ async function setAnswer() {
     const { set } = await api(`/api/sets/${st.SET.id}/answer`, { method: "POST", body });
     st.SET = set;
     // 択一・穴埋めは答えたその場で解説が出る。読んでいるあいだはタイマーを止め、次の問題へ移ったら再開する
-    if (AUTO(it) && tm.id === set.id) timerHold(set.id);
+    // （返事が届く前に別の問題へ移っていたら止めない）
+    if (AUTO(it) && tm.id === set.id && set.items[setAt] && set.items[setAt].id === it.id) timerHold(set.id);
     resumeDeferred(set.id, it.id);
     if (it.kind === "short") setAt++;
     drawSet();
@@ -258,8 +263,9 @@ async function setMove(d) {
     try { st.SET = (await api(`/api/sets/${st.SET.id}/answer`, { method: "POST", body: { item: it.id, value: $("#set-short-text").value } })).set; }
     catch (e) { return notice(esc(e.message), "error"); }
   }
+  const before = setAt;
   setAt = Math.min(Math.max(setAt + d, 0), st.SET.items.length);
-  if (st.SET.status === "open" && tm.id === st.SET.id) timerRelease(st.SET.id);
+  if (setAt !== before && st.SET.status === "open" && tm.id === st.SET.id) timerRelease(st.SET.id);
   drawSet();
 }
 $("#set-prev").addEventListener("click", () => setMove(-1));
