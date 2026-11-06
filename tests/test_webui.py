@@ -534,6 +534,85 @@ class WebUITest(unittest.TestCase):
             self.wait_job(r["job"]["id"])
         self.assertEqual(len(asks.read_text(encoding="utf-8").splitlines()), before + 3, "もう一度は記録しない")
 
+    def test_13_pages(self):
+        # ページの URL はどれも index.html を返す（画面の main.js が URL を見てページを出す）
+        for path in ("/", "/bank", "/bank/b-web-c0-q0", "/concepts", "/sets/set-20261101-120000", "/study/"):
+            with urllib.request.urlopen(self.base + path) as r:
+                self.assertIn('src="/main.js"', r.read().decode("utf-8"), path)
+        for path in ("/nope", "/bank/../exam", "/bank/a/b"):
+            with self.assertRaises(urllib.error.HTTPError, msg=path) as e:
+                urllib.request.urlopen(self.base + path)
+            self.assertEqual(e.exception.code, 404, path)
+
+    def test_14_bank_admin(self):
+        # test_11 の問題バンクを使う。解きかけのセットに入っている問題は変えられない
+        code, r = self.call("/api/bank/items")
+        self.assertEqual(code, 200, r)
+        self.assertEqual(len(r["items"]), 8)
+        self.assertEqual(r["trash"], [])
+        self.assertEqual([c["concept"] for c in r["concepts"]], ["web/c0", "web/c1"])
+        busy = [x for x in r["items"] if x["busy"]]
+        free = next(x for x in r["items"] if not x["busy"] and x["kind"] == "choice")
+        self.assertTrue(busy)
+        answered = next(x for x in r["items"] if x["stats"]["n"])
+        self.assertEqual(answered["stats"]["n"], 1)
+        iid = free["id"]
+        self.assertEqual((free["tags"], free["difficulty"], free["verified"], free["has_key"]), (["web"], free["difficulty"], True, True))
+        # 1問：正解キーは頼んだときだけ
+        code, r = self.call(f"/api/bank/items/{iid}")
+        self.assertEqual(code, 200, r)
+        self.assertNotIn("key", r["item"])
+        self.assertIn("- ア 正しい", r["item"]["body"])
+        _, r = self.call(f"/api/bank/items/{iid}?key=1")
+        self.assertIn("answer: ア", r["item"]["key"])
+        code, _ = self.call("/api/bank/items/nope")
+        self.assertEqual(code, 404)
+        code, _ = self.call("/api/bank/items/..%2Fkeys%2Fx")
+        self.assertEqual(code, 404)
+        # メタ情報だけの編集では verified はそのまま。先頭が主
+        code, r = self.call(f"/api/bank/items/{iid}", "PUT", {"tags": ["web", "network"], "concepts": "web/c1, web/c0", "difficulty": 3})
+        self.assertEqual(code, 200, r)
+        self.assertEqual((r["item"]["tags"], r["item"]["concepts"], r["item"]["difficulty"], r["item"]["verified"]),
+                         (["web", "network"], ["web/c1", "web/c0"], 3, True))
+        text = (self.tmp / "bank" / "items" / f"{iid}.md").read_text(encoding="utf-8")
+        self.assertIn("tags: [web, network]\n", text)
+        self.assertIn("- ア 正しい", text)
+        # おかしい値は断る
+        for bad in ({"tags": []}, {"tags": ["Web"]}, {"concepts": ["c0"]}, {"difficulty": 4}, {"body": "  "}, {"key": ""}):
+            code, _ = self.call(f"/api/bank/items/{iid}", "PUT", bad)
+            self.assertEqual(code, 400, bad)
+        # 本文か正解キーを変えたら確認待ちに戻す（出題されなくなる）
+        code, r = self.call(f"/api/bank/items/{iid}", "PUT", {"key": "---\nid: x\nanswer: イ\n---\n直した解説"})
+        self.assertEqual(code, 200, r)
+        self.assertFalse(r["item"]["verified"])
+        self.assertIn("answer: イ", (self.tmp / "bank" / "keys" / f"{iid}.md").read_text(encoding="utf-8"))
+        _, b = self.call("/api/bank")
+        self.assertEqual(b["unverified"], 1)
+        # 解きかけのセットの問題は、編集も削除もできない
+        code, _ = self.call(f"/api/bank/items/{busy[0]['id']}", "PUT", {"difficulty": 1})
+        self.assertEqual(code, 409)
+        code, _ = self.call(f"/api/bank/items/{busy[0]['id']}/trash", "POST", {})
+        self.assertEqual(code, 409)
+        # 削除はゴミ箱へ。戻せる
+        code, _ = self.call(f"/api/bank/items/{iid}/trash", "POST", {})
+        self.assertEqual(code, 200)
+        self.assertFalse((self.tmp / "bank" / "items" / f"{iid}.md").exists())
+        self.assertTrue((self.tmp / "bank" / "trash" / "keys" / f"{iid}.md").exists())
+        _, r = self.call("/api/bank/items")
+        self.assertEqual(([x["id"] for x in r["trash"]], len(r["items"])), ([iid], 7))
+        _, r = self.call(f"/api/bank/items/{iid}")
+        self.assertTrue(r["item"]["trashed"])
+        code, _ = self.call(f"/api/bank/items/{iid}", "PUT", {"difficulty": 1})
+        self.assertEqual(code, 404, "ゴミ箱の問題は直さない")
+        code, _ = self.call(f"/api/bank/items/{iid}/restore", "POST", {})
+        self.assertEqual(code, 200)
+        self.assertTrue((self.tmp / "bank" / "keys" / f"{iid}.md").exists())
+        code, _ = self.call(f"/api/bank/items/{iid}/restore", "POST", {})
+        self.assertEqual(code, 404)
+        # 書き換えはヘッダーなしでは受けない
+        code, _ = self.call(f"/api/bank/items/{iid}/trash", "POST", {}, headers={"X-Learn": "0"})
+        self.assertEqual(code, 403)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -29,7 +29,7 @@ class StaticModulesTest(unittest.TestCase):
 
     def test_index_loads_entry_module(self):
         html = (STATIC / "index.html").read_text(encoding="utf-8")
-        self.assertIn('<script type="module" src="main.js"></script>', html)
+        self.assertIn('<script type="module" src="/main.js"></script>', html)
 
 
 if __name__ == "__main__":

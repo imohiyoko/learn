@@ -4,20 +4,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>learn</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="/style.css">
 </head>
 <body>
 <header>
-  <h1>learn</h1>
+  <h1><a href="/" class="brand">learn</a></h1>
   <span id="exam" class="muted"></span>
   <nav>
-    <button data-tab="home" class="active">ホーム</button>
-    <button data-tab="study">学習する</button>
-    <button data-tab="stats">成績</button>
-    <button data-tab="history">履歴</button>
-    <button data-tab="glossary">単語帳</button>
-    <button data-tab="refs">資料</button>
-    <button data-tab="settings">設定</button>
+    <a href="/" data-page="home">ホーム</a>
+    <a href="/study" data-page="study">学習する</a>
+    <a href="/bank" data-page="bank">問題</a>
+    <a href="/concepts" data-page="concepts">論点</a>
+    <a href="/stats" data-page="stats">成績</a>
+    <a href="/history" data-page="history">履歴</a>
+    <a href="/glossary" data-page="glossary">単語帳</a>
+    <a href="/refs" data-page="refs">資料</a>
+    <a href="/settings" data-page="settings">設定</a>
   </nav>
 </header>
 
@@ -49,7 +51,7 @@
         <button class="primary" data-start="question">おすすめの記述を1問</button>
         <button data-start="drill">おすすめで択一ドリル</button>
         <button data-start="review">振り返り</button>
-        <a href="#" data-go="study" class="small">くわしく選ぶ</a>
+        <a href="/study" class="small">くわしく選ぶ</a>
       </div>
       <p id="home-rec" class="muted small"></p>
       <p id="home-glossary" class="small" hidden></p>
@@ -100,7 +102,7 @@
       <div class="row" data-for="import">
         <label>年度 <input name="year" placeholder="r06a" size="8"></label>
         <label>問番号 <input name="q" placeholder="q1" size="6"></label>
-        <span class="muted small">先に<a href="#" data-go="refs">資料</a>から問題冊子と解答例をアップロードしてください</span>
+        <span class="muted small">先に<a href="/refs">資料</a>から問題冊子と解答例をアップロードしてください</span>
       </div>
       <p id="rec" class="muted small"></p>
       <button type="submit" class="primary" id="start-btn">はじめる</button>
@@ -215,6 +217,136 @@
     </div>
   </section>
 
+  <!-- 問題：バンクの問題を1問ずつ管理する -->
+  <section id="tab-bank" class="tab" hidden>
+    <div class="card">
+      <div class="card-head">
+        <h2>問題バンク</h2>
+        <span id="bank-summary" class="muted small"></span>
+      </div>
+      <p class="muted small"><code>/prepare</code> で作った問題（<code>bank/items/</code>）です。行を押すと、本文・成績の確認と、編集・削除ができます。</p>
+      <div class="row filters">
+        <input id="bank-q" type="search" placeholder="id・本文でさがす" aria-label="さがす">
+        <select id="bank-kind" aria-label="形式"></select>
+        <select id="bank-tag" aria-label="分野"></select>
+        <select id="bank-concept" aria-label="論点"></select>
+        <select id="bank-diff" aria-label="難しさ">
+          <option value="">難しさ：すべて</option>
+          <option value="1">1 易しい</option>
+          <option value="2">2 ふつう</option>
+          <option value="3">3 難しい</option>
+        </select>
+        <select id="bank-status" aria-label="状態">
+          <option value="">状態：すべて</option>
+          <option value="verified">確認済み</option>
+          <option value="unverified">確認待ち</option>
+          <option value="nokey">正解キーなし</option>
+          <option value="new">まだ解いていない</option>
+          <option value="wrong">前回まちがえた</option>
+        </select>
+        <select id="bank-sort" aria-label="並べ方">
+          <option value="id">id 順</option>
+          <option value="new">新しい順</option>
+          <option value="rate">正答率の低い順</option>
+          <option value="n">解いた回数の多い順</option>
+        </select>
+      </div>
+      <div class="table"><table class="list"><thead><tr><th>問題</th><th>形式</th><th>分野・論点</th><th>難しさ</th><th>状態</th><th>成績</th></tr></thead><tbody id="bank-list"></tbody></table></div>
+    </div>
+    <details class="card" id="bank-trash">
+      <summary>ゴミ箱 <span id="bank-trash-n" class="muted small"></span></summary>
+      <p class="muted small">削除した問題は <code>bank/trash/</code> に移してあります。戻すと、またバンクから出題されます。</p>
+      <div class="table"><table class="list"><thead><tr><th>問題</th><th>形式</th><th>分野</th><th></th></tr></thead><tbody id="bank-trash-list"></tbody></table></div>
+    </details>
+  </section>
+
+  <!-- 問題1問：閲覧・編集・削除 -->
+  <section id="tab-bank-item" class="tab" hidden>
+    <p class="small"><a href="/bank" id="bi-back">← 問題の一覧へ</a></p>
+    <div class="card">
+      <div class="card-head">
+        <h2 id="bi-title"></h2>
+        <span id="bi-badges"></span>
+      </div>
+      <p id="bi-meta" class="small"></p>
+      <p id="bi-note" class="notice warn small" hidden></p>
+      <div id="bi-body" class="md"></div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h2>正解と解説</h2>
+        <button id="bi-key-show" class="small" type="button">正解を見る</button>
+      </div>
+      <p id="bi-key-help" class="muted small">これから解く問題なら、見ないでおくと練習になります。</p>
+      <div id="bi-key" class="md" hidden></div>
+    </div>
+    <div class="card">
+      <h2>成績</h2>
+      <div id="bi-history"></div>
+    </div>
+    <div class="card" id="bi-edit-card">
+      <div class="card-head">
+        <h2>編集</h2>
+        <button id="bi-edit-open" class="small" type="button">編集する</button>
+      </div>
+      <form id="bi-edit" hidden>
+        <div class="row">
+          <label class="grow">分野タグ <input name="tags" id="bi-tags" placeholder="先頭が主タグ（カンマ区切り）" autocomplete="off"></label>
+        </div>
+        <div class="row">
+          <label class="grow">論点 <input name="concepts" id="bi-concepts" list="bi-concept-list" placeholder="先頭が主な論点（カンマ区切り）" autocomplete="off"></label>
+          <datalist id="bi-concept-list"></datalist>
+        </div>
+        <div class="row">
+          <label>難しさ
+            <select name="difficulty" id="bi-diff">
+              <option value="1">1 易しい（用語の意味）</option>
+              <option value="2">2 ふつう（仕組み・使い分け）</option>
+              <option value="3">3 難しい（場面への当てはめ）</option>
+            </select>
+          </label>
+        </div>
+        <label class="block">本文 <span class="muted small">（front matter より後ろ。択一の選択肢は「- ア …」の行）</span>
+          <textarea id="bi-body-text" rows="12" spellcheck="false"></textarea></label>
+        <label class="block">正解キー <span class="muted small">（<code>bank/keys/</code> のファイル全体）</span>
+          <textarea id="bi-key-text" rows="12" spellcheck="false"></textarea></label>
+        <p class="muted small">本文か正解キーを変えると「確認待ち」に戻り、次の <code>/prepare</code> で verifier が確かめるまで出題されません。分野・論点・難しさだけなら、そのままです。</p>
+        <div class="row">
+          <button type="submit" class="primary">保存</button>
+          <button type="button" id="bi-edit-cancel">やめる</button>
+          <span id="bi-edit-status" class="muted small"></span>
+        </div>
+      </form>
+    </div>
+    <div class="card">
+      <h2>削除</h2>
+      <p class="muted small">ゴミ箱（<code>bank/trash/</code>）に移します。成績の記録は消えません。問題の一覧のゴミ箱から戻せます。</p>
+      <div class="row">
+        <button id="bi-trash" type="button" class="danger">この問題を削除する</button>
+        <button id="bi-restore" type="button" hidden>バンクに戻す</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 論点：exam/concepts.md の論点ごとの見込みと在庫 -->
+  <section id="tab-concepts" class="tab" hidden>
+    <div class="card">
+      <div class="card-head">
+        <h2>論点ごとの見込みと問題の在庫</h2>
+        <span id="concepts-summary" class="muted small"></span>
+      </div>
+      <p class="muted small">見込みは問題バンクのセットと長文の結果から。次のセットはこれをもとに機械的に選ばれます。在庫はまだ解いていない問題の数で、足りない分は <code>/prepare</code>（ホームの「問題バンクを作る」）で作り足せます。</p>
+      <div class="row">
+        <select id="concepts-tag" aria-label="分野"></select>
+      </div>
+      <div id="concepts-body"></div>
+    </div>
+    <div class="card">
+      <h2>本番形式の長文（分野ごと）</h2>
+      <div id="concepts-long"></div>
+    </div>
+  </section>
+
   <!-- 単語帳：解答中に聞いた言葉・採点で落とした用語・自分で足した言葉 -->
   <section id="tab-glossary" class="tab" hidden>
     <div class="card" id="flash" hidden>
@@ -313,11 +445,7 @@
   <!-- 成績 -->
   <section id="tab-stats" class="tab" hidden>
     <div class="card"><div id="stats-body"></div></div>
-    <div class="card">
-      <h2>論点ごとの見込み</h2>
-      <p class="muted small">問題バンクのセットと長文の結果から。次のセットはこれをもとに機械的に選ばれます。</p>
-      <div id="concepts-body"></div>
-    </div>
+    <p class="muted small">論点ごとの見込みと問題の在庫は<a href="/concepts">論点</a>のページにあります。</p>
   </section>
 
   <!-- 履歴 -->
@@ -365,8 +493,8 @@
   <button id="timer-reset" class="small" type="button" title="リセット">↺</button>
 </div>
 
-<script src="md.js"></script>
-<script src="answer.js"></script>
-<script type="module" src="main.js"></script>
+<script src="/md.js"></script>
+<script src="/answer.js"></script>
+<script type="module" src="/main.js"></script>
 </body>
 </html>

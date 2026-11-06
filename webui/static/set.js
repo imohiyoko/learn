@@ -1,7 +1,7 @@
 // learn web UI の set.js：セット（問題バンク）：解く・提出・レポート、途中のわからない言葉。
 // サーバー（webui/server.py）の /api を呼ぶだけの素の JavaScript（ES モジュール。ビルドは要らない）。
 import { $, $$, api, esc, notice, st } from "./util.js";
-import { showTab } from "./main.js";
+import { go, setStudyPath } from "./main.js";
 import { fetchShown, openJob, start, timerAutoStart, timerPause, timerSet, tm } from "./study.js";
 import { pct } from "./stats.js";
 
@@ -24,8 +24,7 @@ export async function newSet(opts) {
       notice(`問題バンクの在庫が足りないので、${set.items.length}問だけ出しました。` +
         `「問題バンクを作る」で作り足すと、選べる問題が増えます。`, "warn");
     }
-    showTab("study");
-    window.scrollTo({ top: 0 });
+    go("/sets/" + encodeURIComponent(set.id));
   } catch (e) { notice(esc(e.message), "error"); }
 }
 
@@ -35,7 +34,7 @@ export async function openSet(id, keepTab) {
     const { set } = await api(`/api/sets/${encodeURIComponent(id)}`);
     if (gen !== setGen) return;
     showSet(set);
-    if (!keepTab) { showTab("study"); window.scrollTo({ top: 0 }); }
+    if (!keepTab) go("/sets/" + encodeURIComponent(set.id));
   } catch (e) { notice(esc(e.message), "error"); }
 }
 
@@ -44,6 +43,7 @@ function showSet(s, at) {
   st.SET = s;
   try { localStorage.setItem("learn.set", s.id); } catch (e) {}
   $("#set-card").hidden = false;
+  setStudyPath(s.id);
   $("#set-title").textContent = (s.kind === "choice" ? "択一ドリル " : "セット ") + s.id.replace(/^set-/, "");
   const label = { open: "解いている途中", submitted: "採点中", graded: "採点済み" }[s.status];
   $("#set-meta").textContent = `${s.phase}・${s.items.length}問・${label}`;

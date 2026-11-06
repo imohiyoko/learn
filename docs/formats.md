@@ -30,8 +30,9 @@
 | `rubrics/<id>.md` | `templates/rubric.md` | `/question`（バンクからコピー）・`/import-past` | `/grade`・grader。**採点が終わるまで学習者に見せない** |
 | `answers/<id>.md` | `templates/answer.md`。`## 設問N` / `(n)` の見出しで欄を分ける | 学習者・web UI | `/grade`・web UI |
 | `results/<id>.md` | `templates/result.md` | `/grade` | 学習者・web UI |
-| `bank/items/<id>.md` | `templates/bank/choice.md`・`templates/bank/fill.md`・`templates/bank/short.md`。front matter の `kind`・`tags`・`concepts`・`difficulty`・`verified` | `/prepare` | `scripts/route.py`・web UI・`/question`・`/drill`・verifier |
-| `bank/keys/<id>.md` | `templates/bank/choice-key.md`・`templates/bank/fill-key.md`・`templates/bank/short-key.md` | `/prepare` | web UI（択一・穴埋めの答え合わせ）・`/grade-set`・grader。**答えるまで見せない** |
+| `bank/items/<id>.md` | `templates/bank/choice.md`・`templates/bank/fill.md`・`templates/bank/short.md`。front matter の `kind`・`tags`・`concepts`・`difficulty`・`verified` | `/prepare`・web UI の問題ページ（tags・concepts・difficulty・本文の編集。本文を変えたら `verified: false`） | `scripts/route.py`・web UI・`/question`・`/drill`・verifier |
+| `bank/keys/<id>.md` | `templates/bank/choice-key.md`・`templates/bank/fill-key.md`・`templates/bank/short-key.md` | `/prepare`・web UI の問題ページ（編集したら問題を `verified: false` に） | web UI（択一・穴埋めの答え合わせ）・`/grade-set`・grader。**答えるまで見せない** |
+| `bank/trash/items/<id>.md`・`bank/trash/keys/<id>.md` | 削除した問題（ゴミ箱。`bank/items` と同じ形） | web UI の問題ページ | web UI（戻すとき）。route.py は読まない |
 | `sets/<set>/set.json` | セットの問題と答え | web UI | `/grade-set`・web UI |
 | `reports/<set>.md` | `templates/report.md` | `/grade-set` | 学習者・web UI |
 | `exam/profile.md` | `templates/profile.md`。「分野タグ」「択一問題」「穴埋め問題」の節 | `/setup-exam` | すべてのスキル・`scripts/`・web UI |

@@ -1,7 +1,7 @@
 // learn web UI の study.js：学習：出題の依頼、会話、択一ドリル、解答欄、タイマー、解答中の質問。
 // サーバー（webui/server.py）の /api を呼ぶだけの素の JavaScript（ES モジュール。ビルドは要らない）。
 import { $, $$, api, esc, notice, st } from "./util.js";
-import { loadState, showTab } from "./main.js";
+import { loadState, setStudyPath, showTab } from "./main.js";
 import { newSet, openSet, showResult } from "./set.js";
 
 // ---------------------------------------------------------- 学習フォーム
@@ -44,6 +44,7 @@ export async function start(body) {
   try {
     const r = await api("/api/run", { method: "POST", body });
     $("#set-card").hidden = true; // 別の学習を始めたら、セットはしまう（ホームの「続きから」で戻れる）
+    setStudyPath(null);
     openJob(r.job);
     showTab("study");
     window.scrollTo({ top: 0 });

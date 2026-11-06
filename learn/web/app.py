@@ -39,15 +39,21 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from learn.web import files
+from learn.web.bank import bank_detail, list_bank, restore_bank, save_bank, trash_bank
 from learn.web.files import safe_child
 from learn.web.glossary import add_term, ask_message, glossary, record_ask, update_term_state
 from learn.web.home import analysis, list_items, profile_status, state
 from learn.web.jobs import InboxJobs, Jobs, build_prompt, claude_bin
 from learn.web.refs import REF_DIRS, REF_MAX, list_refs, save_ref
-from learn.web.sets import answer_set_item, ask_set_word, bank_status, create_set, list_sets, load_set, save_set, set_view, submit_set
+from learn.web.sets import SET_LOCK, answer_set_item, ask_set_word, bank_status, create_set, list_sets, load_set, save_set, set_view, submit_set
 
 
 STATIC = Path(__file__).resolve().parents[2] / "webui" / "static"
+
+# 画面のページ（URL ごとに分けて、戻る・ブックマーク・再読み込みが効くように）。どれも index.html を返し、
+# どのページを出すかは画面の main.js が URL を見て決める
+PAGE_RE = re.compile(r"^/(home|study|stats|history|glossary|refs|settings|bank|concepts)?/?$"
+                     r"|^/(bank|sets)/[A-Za-z0-9][A-Za-z0-9_.-]*/?$")
 
 CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
                  ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png",
@@ -146,7 +152,7 @@ class Handler(BaseHTTPRequestHandler):
         if not path.startswith("/api/") and not path.startswith("/assets/"):
             if not self.host_ok():
                 return self.error(HTTPStatus.FORBIDDEN, "このホスト名では使えません")
-            name = "index.html" if path in ("/", "") else path.lstrip("/")
+            name = "index.html" if path == "" or PAGE_RE.match(path) else path.lstrip("/")
             p = (STATIC / name).resolve()
             if p.parent != STATIC.resolve() or not p.is_file():
                 return self.error(404, "not found")
@@ -179,6 +185,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(glossary())
             if path == "/api/bank":
                 return self.send_json(bank_status())
+            if path == "/api/bank/items":
+                return self.send_json(list_bank())
+            m = re.match(r"^/api/bank/items/([^/]+)$", path)
+            if m:
+                return self.send_json({"item": bank_detail(m.group(1), q.get("key") == "1")})
             if path == "/api/sets":
                 return self.send_json({"sets": list_sets()})
             m = re.match(r"^/api/sets/([^/]+)$", path)
@@ -196,6 +207,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not p or not p.is_file() or p.suffix.lower() not in CONTENT_TYPES:
                     return self.error(404, "not found")
                 return self.send_file(p)
+        except LookupError as e:
+            return self.error(404, str(e))
         except Exception as e:  # 想定外でも画面は落とさない
             return self.error(500, f"{type(e).__name__}: {e}")
         return self.error(404, "not found")
@@ -274,6 +287,11 @@ class Handler(BaseHTTPRequestHandler):
                         save_set(s)
                         raise
                 return self.send_json({"set": set_view(s), "job": job if isinstance(job, dict) else job.summary()})
+            m = re.match(r"^/api/bank/items/([^/]+)/(trash|restore)$", path)
+            if m:
+                with SET_LOCK:  # セットを作るのと同時に、そのセットの問題を消さないように
+                    (trash_bank if m.group(2) == "trash" else restore_bank)(m.group(1))
+                return self.send_json({"ok": True})
             if path == "/api/glossary":
                 add_term(body.get("term"), body.get("meaning"), body.get("tags"))
                 return self.send_json({"ok": True})
@@ -328,6 +346,10 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             body = self.body()
+            m = re.match(r"^/api/bank/items/([^/]+)$", path)
+            if m:
+                with SET_LOCK:
+                    return self.send_json({"item": save_bank(m.group(1), body)})
             text = body.get("text")
             if not isinstance(text, str):
                 return self.error(400, "text がありません")
@@ -347,6 +369,10 @@ class Handler(BaseHTTPRequestHandler):
                     p.parent.mkdir(exist_ok=True)
                     p.write_text(text, encoding="utf-8")
                 return self.send_json({"ok": True})
+        except LookupError as e:
+            return self.error(404, str(e))
+        except (ValueError, RuntimeError) as e:
+            return self.error(400 if isinstance(e, ValueError) else 409, str(e))
         except Exception as e:
             return self.error(500, f"{type(e).__name__}: {e}")
         return self.error(404, "not found")
